@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Gerzain's Ubuntu / Debian System Bootstrap Script
+# Gerzain's Linux & macOS System Bootstrap Script
 #
 # Usage (One-liner via curl):
 #   curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
@@ -11,15 +11,17 @@
 # Summary of automated actions:
 #   1. Locale configuration: en_US.UTF-8 generated and set system-wide
 #   2. Timezone configuration: defaults to America/Phoenix (configurable)
-#   3. System upgrade: sudo apt update, full-upgrade, dist-upgrade, autoremove
-#   4. Core development tools: git, build-essential, cmake, ninja, clang, lld, etc.
-#   5. Modern CLI utilities: vim, btop, mosh, binutils, tmux, ripgrep, fd, bat, fzf
-#   6. Embedded ARM toolchain: gcc-arm-none-eabi, gdb-multiarch, newlib libraries
-#   7. Hardware access: dialout & plugdev groups, probe-rs udev rules
+#   3. Package manager: APT (Debian/Ubuntu) or Homebrew (macOS) upgrades
+#   4. Core development tools: git, cmake, ninja, clang/llvm, pkg-config, etc.
+#   5. Modern CLI utilities: vim, btop, mosh, tmux, ripgrep, fd, bat, fzf
+#   6. Embedded ARM toolchain: gcc-arm-none-eabi, gdb, newlib, openocd, probe-rs
+#   7. Hardware access: dialout & plugdev groups, probe-rs udev rules (Linux)
 #   8. Shell setup: Zsh + Oh-My-Zsh with autosuggestions & syntax highlighting
-#   9. Curated Dotfiles: .vimrc with badwolf/molokai themes & cross-shell aliases
+#   9. Curated Dotfiles: .vimrc, .tmux.conf, .editorconfig, .hushlogin, .gitmessage,
+#      unified full-upgrade script (alias: up), and shell aliases
 #  10. Rust toolchain: rustup (stable), Cortex-M/RISC-V/Wasm targets,
 #      probe-rs tools, cargo-binstall, cargo-deny, cargo-llvm-cov
+#  11. Zed Editor: high-performance code editor
 # ==============================================================================
 
 # POSIX /bin/sh compatibility trampoline:
@@ -92,21 +94,21 @@ log_error() {
 
 print_help() {
     cat <<EOF
-Gerzain's Linux System Bootstrap Script
+Gerzain's Linux & macOS System Bootstrap Script
 
 Usage:
   ./bootstrap.sh [OPTIONS]
-  curl -fsSL https://raw.githubusercontent.com/leftger/leftger/main/bootstrap.sh | bash -s -- [OPTIONS]
+  curl -fsSL https://raw.githubusercontent.com/leftger/leftger.github.io/main/bootstrap.sh | bash -s -- [OPTIONS]
 
 Options:
   -t, --timezone <TZ>   Set system timezone (default: ${DEFAULT_TIMEZONE})
-      --skip-upgrade    Skip apt full-upgrade / dist-upgrade
+      --skip-upgrade    Skip system / package manager upgrades
       --skip-embedded   Skip ARM Cortex-M toolchain and probe-rs setup
       --skip-rust       Skip Rust toolchain and cargo utilities installation
       --skip-zed        Skip Zed editor installation
-      --skip-zsh        Skip Oh-My-Zsh installation and shell change
+      --skip-zsh        Skip Oh-My-Zsh installation and shell configuration
       --skip-tools      Skip modern CLI utilities installation
-      --skip-dotfiles   Skip curated .vimrc, themes, and shell aliases
+      --skip-dotfiles   Skip curated dotfiles, tmux, vim, and shell aliases
       --dry-run         Print actions without executing commands
   -h, --help            Show this help message and exit
 
@@ -173,14 +175,22 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log_info "Running in DRY RUN mode. No modifications will be made."
 fi
 
-# Ensure running on Linux
-if [ "$(uname -s)" != "Linux" ]; then
-    log_error "This script is designed for Ubuntu/Debian Linux systems."
+# Ensure running on supported operating system (Linux or macOS)
+OS_TYPE="$(uname -s)"
+if [ "$OS_TYPE" != "Linux" ] && [ "$OS_TYPE" != "Darwin" ]; then
+    log_error "Unsupported operating system: ${OS_TYPE}. This script supports Linux (Ubuntu/Debian) and macOS."
     exit 1
 fi
 
 TARGET_USER="${SUDO_USER:-$USER}"
-TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME")"
+if command -v getent >/dev/null 2>&1; then
+    TARGET_HOME="$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || echo "$HOME")"
+elif command -v dscl >/dev/null 2>&1; then
+    TARGET_HOME="$(dscl . -read "/Users/$TARGET_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || echo "$HOME")"
+else
+    TARGET_HOME="$HOME"
+fi
+
 if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
     TARGET_HOME="$HOME"
 fi
@@ -260,19 +270,23 @@ APT_FLAGS=("-y" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--f
 # ------------------------------------------------------------------------------
 log_step "Configuring Locale to en_US.UTF-8"
 
-run_sudo apt-get update -qq
-run_sudo apt-get install "${APT_FLAGS[@]}" locales
+if [ "$OS_TYPE" = "Linux" ]; then
+    run_sudo apt-get update -qq
+    run_sudo apt-get install "${APT_FLAGS[@]}" locales
 
-if [ "$DRY_RUN" -eq 1 ]; then
-    log_info "[DRY-RUN] Enable en_US.UTF-8 in /etc/locale.gen, run locale-gen and update-locale"
-else
-    if grep -q "^# en_US.UTF-8 UTF-8" /etc/locale.gen 2>/dev/null; then
-        run_sudo sed -i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Enable en_US.UTF-8 in /etc/locale.gen, run locale-gen and update-locale"
+    else
+        if grep -q "^# en_US.UTF-8 UTF-8" /etc/locale.gen 2>/dev/null; then
+            run_sudo sed -i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+        fi
+        run_sudo locale-gen en_US.UTF-8
+        run_sudo update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+        export LANG=en_US.UTF-8
+        export LC_ALL=en_US.UTF-8
     fi
-    run_sudo locale-gen en_US.UTF-8
-    run_sudo update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-    export LANG=en_US.UTF-8
-    export LC_ALL=en_US.UTF-8
+else
+    log_info "macOS detected. Standard en_US.UTF-8 locale is enabled by default."
 fi
 log_success "Locale configured to en_US.UTF-8"
 
@@ -281,75 +295,151 @@ log_success "Locale configured to en_US.UTF-8"
 # ------------------------------------------------------------------------------
 log_step "Configuring Timezone to ${TIMEZONE}"
 
-if [ ! -f "/usr/share/zoneinfo/${TIMEZONE}" ]; then
-    log_warn "Timezone '${TIMEZONE}' not found in /usr/share/zoneinfo. Falling back to UTC."
-    TIMEZONE="UTC"
-fi
-
-if [ "$DRY_RUN" -eq 1 ]; then
-    log_info "[DRY-RUN] Setting system timezone to ${TIMEZONE} via timedatectl and /etc/localtime"
-else
-    if command -v timedatectl >/dev/null 2>&1 && timedatectl 2>/dev/null | grep -q "Time zone"; then
-        run_sudo timedatectl set-timezone "$TIMEZONE" || true
+if [ "$OS_TYPE" = "Darwin" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Set system timezone to ${TIMEZONE} via systemsetup"
+    else
+        run_sudo systemsetup -settimezone "$TIMEZONE" 2>/dev/null || true
     fi
-    run_sudo ln -fs "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
-    echo "$TIMEZONE" | run_sudo tee /etc/timezone >/dev/null
-    run_sudo dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1 || true
+else
+    if [ ! -f "/usr/share/zoneinfo/${TIMEZONE}" ]; then
+        log_warn "Timezone '${TIMEZONE}' not found in /usr/share/zoneinfo. Falling back to UTC."
+        TIMEZONE="UTC"
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Setting system timezone to ${TIMEZONE} via timedatectl and /etc/localtime"
+    else
+        if command -v timedatectl >/dev/null 2>&1 && timedatectl 2>/dev/null | grep -q "Time zone"; then
+            run_sudo timedatectl set-timezone "$TIMEZONE" || true
+        fi
+        run_sudo ln -fs "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+        echo "$TIMEZONE" | run_sudo tee /etc/timezone >/dev/null
+        run_sudo dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1 || true
+    fi
 fi
 log_success "Timezone set to ${TIMEZONE}"
 
 # ------------------------------------------------------------------------------
-# Step 3: System Upgrade (apt update / full-upgrade / dist-upgrade)
+# Step 3: Package Manager & System Upgrades
 # ------------------------------------------------------------------------------
-if [ "$SKIP_UPGRADE" -eq 0 ]; then
-    log_step "Performing System Upgrades (apt update, full-upgrade, dist-upgrade)"
-    run_sudo apt-get update "${APT_FLAGS[@]}"
-    run_sudo apt-get full-upgrade "${APT_FLAGS[@]}"
-    run_sudo apt-get dist-upgrade "${APT_FLAGS[@]}"
-    run_sudo apt-get autoremove "${APT_FLAGS[@]}"
-    log_success "System packages up to date"
+if [ "$OS_TYPE" = "Darwin" ]; then
+    log_step "Setting Up Homebrew on macOS"
+
+    # Install Xcode Command Line Tools if missing
+    if ! xcode-select -p >/dev/null 2>&1; then
+        log_info "Installing Xcode Command Line Tools..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Run xcode-select --install"
+        else
+            run_cmd xcode-select --install || true
+        fi
+    fi
+
+    # Install Homebrew if not already installed
+    if ! command -v brew >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/brew ] && [ ! -x /usr/local/bin/brew ]; then
+        log_info "Installing Homebrew..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Install Homebrew via curl https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+        else
+            run_user 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        fi
+    else
+        log_info "Homebrew is already installed."
+    fi
+
+    # Activate brew shell environment in current session
+    if [ -x /opt/homebrew/bin/brew ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -x /usr/local/bin/brew ]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+
+    if [ "$SKIP_UPGRADE" -eq 0 ]; then
+        log_info "Updating Homebrew and formula index..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] brew update && brew upgrade"
+        else
+            run_user "brew update && brew upgrade" || true
+        fi
+    fi
+    log_success "Homebrew ready"
 else
-    log_info "Skipping apt upgrades (--skip-upgrade specified)"
+    # Linux (Debian / Ubuntu)
+    if [ "$SKIP_UPGRADE" -eq 0 ]; then
+        log_step "Performing System Upgrades (apt update, full-upgrade, dist-upgrade)"
+        run_sudo apt-get update "${APT_FLAGS[@]}"
+        run_sudo apt-get full-upgrade "${APT_FLAGS[@]}"
+        run_sudo apt-get dist-upgrade "${APT_FLAGS[@]}"
+        run_sudo apt-get autoremove "${APT_FLAGS[@]}"
+        log_success "System packages up to date"
+    else
+        log_info "Skipping apt upgrades (--skip-upgrade specified)"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
-# Step 4: Core Development Tools & Libraries
+# Step 4: Core Development Tools & Dependencies
 # ------------------------------------------------------------------------------
 log_step "Installing Core Development Tools & Dependencies"
 
-CORE_PACKAGES=(
-    build-essential
-    clang
-    lld
-    llvm
-    cmake
-    ninja-build
-    pkg-config
-    libssl-dev
-    git
-    git-lfs
-    curl
-    wget
-    ca-certificates
-    gnupg
-    lsb-release
-    software-properties-common
-    unzip
-    tar
-    gzip
-    xz-utils
-    jq
-    tree
-    vim
-    btop
-    mosh
-    binutils
-    tmux
-    command-not-found
-)
-
-run_sudo apt-get install "${APT_FLAGS[@]}" "${CORE_PACKAGES[@]}"
-log_success "Core development packages installed"
+if [ "$OS_TYPE" = "Darwin" ]; then
+    BREW_CORE_PACKAGES=(
+        cmake
+        ninja
+        pkg-config
+        llvm
+        git
+        git-lfs
+        curl
+        wget
+        jq
+        tree
+        vim
+        btop
+        mosh
+        tmux
+    )
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] brew install ${BREW_CORE_PACKAGES[*]}"
+    else
+        run_user "brew install ${BREW_CORE_PACKAGES[*]}" || true
+    fi
+    log_success "Core development packages installed via Homebrew"
+else
+    CORE_PACKAGES=(
+        build-essential
+        clang
+        lld
+        llvm
+        cmake
+        ninja-build
+        pkg-config
+        libssl-dev
+        git
+        git-lfs
+        curl
+        wget
+        ca-certificates
+        gnupg
+        lsb-release
+        software-properties-common
+        unzip
+        tar
+        gzip
+        xz-utils
+        jq
+        tree
+        vim
+        btop
+        mosh
+        binutils
+        tmux
+        command-not-found
+    )
+    run_sudo apt-get install "${APT_FLAGS[@]}" "${CORE_PACKAGES[@]}"
+    log_success "Core development packages installed via APT"
+fi
 
 # ------------------------------------------------------------------------------
 # Step 5: Modern CLI Productivity Utilities
@@ -357,27 +447,41 @@ log_success "Core development packages installed"
 if [ "$SKIP_TOOLS" -eq 0 ]; then
     log_step "Installing Modern CLI Productivity Utilities"
 
-    CLI_PACKAGES=(
-        ripgrep
-        fd-find
-        bat
-        fzf
-        htop
-    )
-
-    run_sudo apt-get install "${APT_FLAGS[@]}" "${CLI_PACKAGES[@]}"
-
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Symlink batcat -> ~/.local/bin/bat and fdfind -> ~/.local/bin/fd"
-    else
-        mkdir -p "${TARGET_HOME}/.local/bin"
-        if command -v batcat >/dev/null 2>&1 && [ ! -e "${TARGET_HOME}/.local/bin/bat" ]; then
-            ln -sf "$(which batcat)" "${TARGET_HOME}/.local/bin/bat"
-            log_info "Symlinked batcat -> ~/.local/bin/bat"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        BREW_CLI_PACKAGES=(
+            ripgrep
+            fd
+            bat
+            fzf
+            htop
+        )
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] brew install ${BREW_CLI_PACKAGES[*]}"
+        else
+            run_user "brew install ${BREW_CLI_PACKAGES[*]}" || true
         fi
-        if command -v fdfind >/dev/null 2>&1 && [ ! -e "${TARGET_HOME}/.local/bin/fd" ]; then
-            ln -sf "$(which fdfind)" "${TARGET_HOME}/.local/bin/fd"
-            log_info "Symlinked fdfind -> ~/.local/bin/fd"
+    else
+        CLI_PACKAGES=(
+            ripgrep
+            fd-find
+            bat
+            fzf
+            htop
+        )
+        run_sudo apt-get install "${APT_FLAGS[@]}" "${CLI_PACKAGES[@]}"
+
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Symlink batcat -> ~/.local/bin/bat and fdfind -> ~/.local/bin/fd"
+        else
+            mkdir -p "${TARGET_HOME}/.local/bin"
+            if command -v batcat >/dev/null 2>&1 && [ ! -e "${TARGET_HOME}/.local/bin/bat" ]; then
+                ln -sf "$(which batcat)" "${TARGET_HOME}/.local/bin/bat"
+                log_info "Symlinked batcat -> ~/.local/bin/bat"
+            fi
+            if command -v fdfind >/dev/null 2>&1 && [ ! -e "${TARGET_HOME}/.local/bin/fd" ]; then
+                ln -sf "$(which fdfind)" "${TARGET_HOME}/.local/bin/fd"
+                log_info "Symlinked fdfind -> ~/.local/bin/fd"
+            fi
         fi
     fi
 
@@ -385,44 +489,63 @@ if [ "$SKIP_TOOLS" -eq 0 ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Step 6: Embedded ARM Toolchain & Hardware Rules
+# Step 6: Embedded ARM Toolchain & Hardware Tools
 # ------------------------------------------------------------------------------
 if [ "$SKIP_EMBEDDED" -eq 0 ]; then
     log_step "Installing Embedded ARM Cross-Compilation Toolchain & Hardware Tools"
 
-    EMBEDDED_PACKAGES=(
-        gcc-arm-none-eabi
-        binutils-arm-none-eabi
-        libnewlib-arm-none-eabi
-        libstdc++-arm-none-eabi-newlib
-        gdb-multiarch
-        libudev-dev
-        libusb-1.0-0-dev
-        picocom
-        minicom
-    )
-
-    run_sudo apt-get install "${APT_FLAGS[@]}" "${EMBEDDED_PACKAGES[@]}"
-
-    # Add user to dialout and plugdev groups
-    log_info "Adding ${TARGET_USER} to dialout and plugdev groups..."
-    run_sudo usermod -a -G dialout,plugdev "${TARGET_USER}" || true
-
-    # Install probe-rs hardware udev rules
-    log_info "Installing probe-rs udev rules for CMSIS-DAP, ST-Link, J-Link..."
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Install /etc/udev/rules.d/69-probe-rs.rules and reload udevadm"
-    else
-        UDEV_RULES_URL="https://probe.rs/files/69-probe-rs.rules"
-        UDEV_TARGET="/etc/udev/rules.d/69-probe-rs.rules"
-        if curl -fsSL "$UDEV_RULES_URL" -o /tmp/69-probe-rs.rules 2>/dev/null; then
-            run_sudo mv /tmp/69-probe-rs.rules "$UDEV_TARGET"
-            run_sudo chmod 644 "$UDEV_TARGET"
-            run_sudo udevadm control --reload-rules 2>/dev/null || true
-            run_sudo udevadm trigger 2>/dev/null || true
-            log_success "Hardware udev rules installed"
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        BREW_EMBEDDED_PACKAGES=(
+            openocd
+            libusb
+            hidapi
+            picocom
+            minicom
+        )
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] brew install ${BREW_EMBEDDED_PACKAGES[*]}"
+            log_info "[DRY-RUN] brew install --cask gcc-arm-embedded"
         else
-            log_warn "Could not fetch probe-rs udev rules. Continuing."
+            log_info "Installing embedded utilities via Homebrew..."
+            run_user "brew install ${BREW_EMBEDDED_PACKAGES[*]}" || true
+            log_info "Installing ARM GNU embedded toolchain via Homebrew cask..."
+            run_user "brew install --cask gcc-arm-embedded || brew install arm-none-eabi-gcc || true"
+        fi
+        log_info "macOS manages serial and USB debugger access automatically."
+    else
+        EMBEDDED_PACKAGES=(
+            gcc-arm-none-eabi
+            binutils-arm-none-eabi
+            libnewlib-arm-none-eabi
+            libstdc++-arm-none-eabi-newlib
+            gdb-multiarch
+            libudev-dev
+            libusb-1.0-0-dev
+            picocom
+            minicom
+        )
+        run_sudo apt-get install "${APT_FLAGS[@]}" "${EMBEDDED_PACKAGES[@]}"
+
+        # Add user to dialout and plugdev groups
+        log_info "Adding ${TARGET_USER} to dialout and plugdev groups..."
+        run_sudo usermod -a -G dialout,plugdev "${TARGET_USER}" || true
+
+        # Install probe-rs hardware udev rules
+        log_info "Installing probe-rs udev rules for CMSIS-DAP, ST-Link, J-Link..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Install /etc/udev/rules.d/69-probe-rs.rules and reload udevadm"
+        else
+            UDEV_RULES_URL="https://probe.rs/files/69-probe-rs.rules"
+            UDEV_TARGET="/etc/udev/rules.d/69-probe-rs.rules"
+            if curl -fsSL "$UDEV_RULES_URL" -o /tmp/69-probe-rs.rules 2>/dev/null; then
+                run_sudo mv /tmp/69-probe-rs.rules "$UDEV_TARGET"
+                run_sudo chmod 644 "$UDEV_TARGET"
+                run_sudo udevadm control --reload-rules 2>/dev/null || true
+                run_sudo udevadm trigger 2>/dev/null || true
+                log_success "Hardware udev rules installed"
+            else
+                log_warn "Could not fetch probe-rs udev rules. Continuing."
+            fi
         fi
     fi
 
@@ -437,7 +560,9 @@ fi
 if [ "$SKIP_ZSH" -eq 0 ]; then
     log_step "Installing and Configuring Zsh + Oh-My-Zsh"
 
-    run_sudo apt-get install "${APT_FLAGS[@]}" zsh
+    if [ "$OS_TYPE" = "Linux" ]; then
+        run_sudo apt-get install "${APT_FLAGS[@]}" zsh
+    fi
 
     OMZ_DIR="${TARGET_HOME}/.oh-my-zsh"
     if [ ! -d "$OMZ_DIR" ]; then
@@ -478,6 +603,17 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
                 echo '# User custom binary search path' >> "$ZSHRC"
                 echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> "$ZSHRC"
             fi
+            if [ "$OS_TYPE" = "Darwin" ] && ! grep -q 'brew shellenv' "$ZSHRC"; then
+                cat << 'EOF' >> "$ZSHRC"
+
+# Initialize Homebrew environment on macOS
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+EOF
+            fi
             if ! grep -q 'DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
                 echo 'DISABLE_MAGIC_FUNCTIONS="true"' >> "$ZSHRC"
             fi
@@ -493,27 +629,20 @@ if command -v fzf >/dev/null 2>&1; then
 fi
 EOF
             fi
-            if ! grep -q 'locate-shell-integration-path' "$ZSHRC"; then
-                cat << 'EOF' >> "$ZSHRC"
-
-# VS Code shell integration (if running inside VS Code terminal)
-if [[ "${TERM_PROGRAM}" == "vscode" ]] && command -v code >/dev/null 2>&1; then
-    source "$(code --locate-shell-integration-path zsh 2>/dev/null || true)"
-fi
-EOF
-            fi
         fi
     fi
 
-    # Set default shell to zsh
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Change default shell to zsh for ${TARGET_USER}"
-    else
-        ZSH_BIN="$(which zsh)"
-        CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "")"
-        if [ "$CURRENT_SHELL" != "$ZSH_BIN" ]; then
-            log_info "Changing default shell to ${ZSH_BIN} for ${TARGET_USER}..."
-            run_sudo chsh -s "$ZSH_BIN" "$TARGET_USER" || true
+    # Set default shell to zsh (Linux only; macOS defaults to zsh)
+    if [ "$OS_TYPE" = "Linux" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Change default shell to zsh for ${TARGET_USER}"
+        else
+            ZSH_BIN="$(which zsh)"
+            CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "")"
+            if [ "$CURRENT_SHELL" != "$ZSH_BIN" ]; then
+                log_info "Changing default shell to ${ZSH_BIN} for ${TARGET_USER}..."
+                run_sudo chsh -s "$ZSH_BIN" "$TARGET_USER" || true
+            fi
         fi
     fi
 
@@ -523,10 +652,10 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Step 8: Curated Dotfiles (Vim & Shell Productivity Aliases)
+# Step 8: Curated Dotfiles (Vim, Tmux, Standards & Shell Productivity)
 # ------------------------------------------------------------------------------
 if [ "$SKIP_DOTFILES" -eq 0 ]; then
-    log_step "Configuring Curated Dotfiles (Vim Badwolf/Molokai themes & Shell Aliases)"
+    log_step "Configuring Curated Dotfiles & Shell Environment"
 
     # Setup directories
     mkdir -p "${TARGET_HOME}/.vim/colors"
@@ -542,7 +671,7 @@ if [ "$SKIP_DOTFILES" -eq 0 ]; then
             curl -fsSL "${PAGES_BASE}/${rel_path}" -o "$dest" 2>/dev/null || \
             curl -fsSL "${RAW_REPO_BASE}/${rel_path}" -o "$dest" 2>/dev/null || true
         fi
-        chown "${TARGET_USER}:${TARGET_USER}" "$dest" 2>/dev/null || true
+        chown "${TARGET_USER}" "$dest" 2>/dev/null || true
     }
 
     # Deploy .bash_aliases
@@ -635,7 +764,7 @@ EOF
         log_info "[DRY-RUN] Deploy .hushlogin to ${HUSHLOGIN_DEST}"
     else
         touch "$HUSHLOGIN_DEST"
-        chown "${TARGET_USER}:${TARGET_USER}" "$HUSHLOGIN_DEST" 2>/dev/null || true
+        chown "${TARGET_USER}" "$HUSHLOGIN_DEST" 2>/dev/null || true
     fi
 
     # Deploy full-upgrade script
@@ -656,7 +785,7 @@ EOF
     else
         mkdir -p "$CDR_COMPLETION_DIR"
         fetch_asset "dotfiles/.oh-my-zsh/custom/plugins/my-completions/_cdr" "$CDR_COMPLETION_DEST"
-        chown -R "${TARGET_USER}:${TARGET_USER}" "$CDR_COMPLETION_DIR" 2>/dev/null || true
+        chown -R "${TARGET_USER}" "$CDR_COMPLETION_DIR" 2>/dev/null || true
     fi
 
     # Ensure systemd is enabled if running inside WSL
@@ -798,25 +927,21 @@ printf "${BOLD}${GREEN}=========================================================
 
 cat <<EOF
 Summary of changes:
-  • System upgraded (apt update, full-upgrade, dist-upgrade, autoremove)
-  • Locale: en_US.UTF-8 generated and set as default
+  • Operating System: ${OS_TYPE}
+  • Package Manager: $([ "$OS_TYPE" = "Darwin" ] && echo "Homebrew" || echo "APT (Debian/Ubuntu)")
   • Timezone: ${TIMEZONE}
-  • Core Dev: build-essential, cmake, ninja, clang, lld, git, jq, etc.
+  • Core Dev: cmake, ninja, clang/llvm, git, jq, tmux, tree, etc.
   • Modern CLI: vim, btop, mosh, tmux, ripgrep, fd, bat, fzf
-  • Embedded ARM: gcc-arm-none-eabi, gdb-multiarch, newlib libraries
-  • Hardware Access: ${TARGET_USER} added to dialout and plugdev; probe-rs udev rules installed
-  • Shell: Zsh + Oh-My-Zsh with syntax-highlighting and autosuggestions
-  • Dotfiles & Git: .vimrc (badwolf), .bash_aliases, git editor=vim, alias.pa, .gitmessage
-  • Maintenance: ~/.local/bin/full-upgrade (alias: up)
-  • Productivity: .editorconfig, .hushlogin, cdr completion, WSL interop
+  • Embedded Tools: gcc-arm-none-eabi, gdb, newlib, openocd, probe-rs
+  • Shell: Zsh + Oh-My-Zsh with syntax-highlighting, autosuggestions, my-completions
+  • Dotfiles & Git: .vimrc (badwolf), .tmux.conf, .bash_aliases, git editor=vim, alias.pa, .gitmessage
+  • Maintenance: ~/.local/bin/full-upgrade (alias: up) with omz & brew update
+  • Productivity: .editorconfig, .hushlogin, cdr completion
   • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall
   • Editor: Zed editor installed to ~/.local/bin/zed
 
 Next steps:
-  1. If group permissions changed, log out and back in:
-       $ exit   (or reboot)
-  2. Start your new shell:
+  1. Start your new shell:
        $ exec zsh
-  3. Happy hacking! 🦀⚡
+  2. Happy hacking! 🦀⚡
 EOF
-

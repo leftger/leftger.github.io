@@ -40,7 +40,7 @@ if command -v sudo >/dev/null 2>&1; then
     sudo -v
 fi
 
-# 1. APT Packages (Debian / Ubuntu)
+# 1. APT Packages (Debian / Ubuntu Linux)
 if command -v apt-get >/dev/null 2>&1; then
     log_section "Updating APT package index & system upgrades"
     export DEBIAN_FRONTEND=noninteractive
@@ -51,7 +51,36 @@ if command -v apt-get >/dev/null 2>&1; then
     log_success "APT packages successfully updated"
 fi
 
-# 2. Rust Toolchains & Components
+# 2. Homebrew Packages (macOS / Linux)
+if command -v brew >/dev/null 2>&1; then
+    log_section "Updating Homebrew & packages"
+    brew update
+    brew upgrade
+    brew cleanup
+    log_success "Homebrew packages successfully updated"
+fi
+
+# 3. Oh-My-Zsh & Custom Plugins
+OMZ_DIR="${ZSH:-${HOME}/.oh-my-zsh}"
+if [ -d "$OMZ_DIR" ]; then
+    log_section "Updating Oh-My-Zsh & Custom Plugins"
+    if [ -f "${OMZ_DIR}/tools/upgrade.sh" ]; then
+        env ZSH="$OMZ_DIR" sh "${OMZ_DIR}/tools/upgrade.sh" --unattended || true
+    fi
+    # Update custom git plugins (e.g. zsh-autosuggestions, zsh-syntax-highlighting)
+    CUSTOM_PLUGINS_DIR="${ZSH_CUSTOM:-${OMZ_DIR}/custom}/plugins"
+    if [ -d "$CUSTOM_PLUGINS_DIR" ]; then
+        for plugin in "$CUSTOM_PLUGINS_DIR"/*/; do
+            if [ -d "$plugin/.git" ]; then
+                log_info "Updating custom plugin $(basename "$plugin")..."
+                git -C "$plugin" pull --quiet 2>/dev/null || true
+            fi
+        done
+    fi
+    log_success "Oh-My-Zsh and plugins updated"
+fi
+
+# 4. Rust Toolchains & Components
 if command -v rustup >/dev/null 2>&1; then
     log_section "Updating Rust toolchain (rustup)"
     rustup update stable || true
@@ -62,21 +91,21 @@ if command -v rustup >/dev/null 2>&1; then
     log_success "Rust toolchain up to date"
 fi
 
-# 3. Zed Editor
+# 5. Zed Editor
 if command -v zed >/dev/null 2>&1 || [ -f "${HOME}/.local/bin/zed" ]; then
     log_section "Updating Zed Editor"
     curl -f https://zed.dev/install.sh | sh || log_warn "Zed update check completed with non-zero exit"
     log_success "Zed editor up to date"
 fi
 
-# 4. Snap Packages
+# 6. Snap Packages
 if command -v snap >/dev/null 2>&1; then
     log_section "Updating Snap packages"
     sudo snap refresh || true
     log_success "Snap packages updated"
 fi
 
-# 5. Flatpak Packages
+# 7. Flatpak Packages
 if command -v flatpak >/dev/null 2>&1; then
     log_section "Updating Flatpak packages"
     flatpak update --user -y || true
@@ -86,27 +115,24 @@ if command -v flatpak >/dev/null 2>&1; then
     log_success "Flatpak packages updated"
 fi
 
-# 6. Python pipx Packages
+# 8. Python pipx Packages
 if command -v pipx >/dev/null 2>&1; then
     log_section "Updating Python pipx packages"
     pipx upgrade-all || true
     log_success "pipx packages updated"
 fi
 
-# 7. Node / NPM Global Packages
+# 9. Node / NPM Global Packages
 if command -v npm >/dev/null 2>&1; then
     log_section "Updating global npm packages"
     npm update -g || true
     log_success "npm packages updated"
 fi
 
-# 8. WSL & Windows Terminal (if running inside WSL)
+# 10. WSL & Windows Terminal (if running inside WSL)
 if command -v wsl.exe >/dev/null 2>&1; then
     log_section "Checking WSL and Windows updates"
     wsl.exe --update || true
-    if command -v winget.exe >/dev/null 2>&1; then
-        winget.exe upgrade --exact --id Microsoft.VisualStudioCode --source winget --accept-source-agreements --disable-interactivity || true
-    fi
     log_success "WSL checks completed"
 fi
 

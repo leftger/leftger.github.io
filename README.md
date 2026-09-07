@@ -31,7 +31,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
    - `git`, `sudo`, `cargo`, `rust`, `extract`, `z`, `colored-man-pages`, `command-not-found`, `zsh-autosuggestions`, `zsh-syntax-highlighting`, `my-completions` (dynamic `cdr <TAB>` completion).
    - Fast prompt response (`DISABLE_UNTRACKED_FILES_DIRTY="true"`).
    - URL paste fix (`DISABLE_MAGIC_FUNCTIONS="true"`).
-   - VS Code integrated terminal shell integration hook.
    - Safe POSIX alias sourcing with `emulate ksh`.
 8. **Curated Dotfiles & Utilities**:
    - `~/.vimrc` with Badwolf theme, line numbers, automatic trailing whitespace stripping, and 4-space indentation.
