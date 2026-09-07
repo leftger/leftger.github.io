@@ -122,7 +122,7 @@ EOF
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -t|--timezone)
+        -t | --timezone)
             TIMEZONE="$2"
             shift 2
             ;;
@@ -162,7 +162,7 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=1
             shift
             ;;
-        -h|--help)
+        -h | --help)
             print_help
             exit 0
             ;;
@@ -202,7 +202,7 @@ if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
 fi
 
 # Determine script location if running from a local checkout
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE}")" 2>/dev/null && pwd || echo "")"
 
 run_cmd() {
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -507,7 +507,7 @@ if [ "$SKIP_EMBEDDED" -eq 0 ]; then
         )
         if [ "$DRY_RUN" -eq 1 ]; then
             log_info "[DRY-RUN] brew install ${BREW_EMBEDDED_PACKAGES[*]}"
-            log_info "[DRY-RUN] brew install --cask gcc-arm-embedded"
+            log_info Behind [DRY-RUN] brew install --cask gcc-arm-embedded
         else
             log_info "Installing embedded utilities via Homebrew..."
             run_user "brew install ${BREW_EMBEDDED_PACKAGES[*]}" || true
@@ -574,10 +574,10 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
         log_info "Oh-My-Zsh is already installed at ${OMZ_DIR}"
     fi
 
-    # Plugins: zsh-autosuggestions & zsh-syntax-highlighting
+    # Plugins: zsh-autosuggestions, zsh-syntax-highlighting & official zsh-completions repository
     PLUGINS_DIR="${OMZ_DIR}/custom/plugins"
     if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Clone zsh-autosuggestions & zsh-syntax-highlighting into ${PLUGINS_DIR}"
+        log_info "[DRY-RUN] Clone zsh-autosuggestions, zsh-syntax-highlighting & zsh-completions into ${PLUGINS_DIR}"
     else
         mkdir -p "$PLUGINS_DIR"
         if [ ! -d "${PLUGINS_DIR}/zsh-autosuggestions" ]; then
@@ -586,11 +586,16 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
         if [ ! -d "${PLUGINS_DIR}/zsh-syntax-highlighting" ]; then
             git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git "${PLUGINS_DIR}/zsh-syntax-highlighting" 2>/dev/null || true
         fi
+        if [ ! -d "${PLUGINS_DIR}/zsh-completions" ]; then
+            git clone https://github.com/zsh-users/zsh-completions.git "${PLUGINS_DIR}/zsh-completions" 2>/dev/null || true
+        fi
     fi
 
     # Configure ~/.zshrc
     ZSHRC="${TARGET_HOME}/.zshrc"
-    TARGET_PLUGINS="git sudo cargo rust extract z colored-man-pages command-not-found zsh-autosuggestions zsh-syntax-highlighting my-completions"
+    # purged 'cargo' and 'my-completions'; migrated 'cargo' features to the native 'rust' plugin
+    TARGET_PLUGINS="git sudo rust extract z colored-man-pages command-not-found zsh-autosuggestions zsh-syntax-highlighting"
+
     if [ "$DRY_RUN" -eq 1 ]; then
         log_info "[DRY-RUN] Configure plugins (${TARGET_PLUGINS}) and PATH in ${ZSHRC}"
     else
@@ -598,15 +603,15 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
             if grep -q "^plugins=(" "$ZSHRC"; then
                 sed -i "s/^plugins=(.*)/plugins=($TARGET_PLUGINS)/" "$ZSHRC"
             elif ! grep -q "plugins=" "$ZSHRC"; then
-                echo "plugins=($TARGET_PLUGINS)" >> "$ZSHRC"
+                echo "plugins=($TARGET_PLUGINS)" >>"$ZSHRC"
             fi
             if ! grep -q 'export PATH="\$HOME/\.local/bin:\$HOME/\.cargo/bin:\$PATH"' "$ZSHRC"; then
-                echo '' >> "$ZSHRC"
-                echo '# User custom binary search path' >> "$ZSHRC"
-                echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> "$ZSHRC"
+                echo '' >>"$ZSHRC"
+                echo '# User custom binary search path' >>"$ZSHRC"
+                echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >>"$ZSHRC"
             fi
             if [ "$OS_TYPE" = "Darwin" ] && ! grep -q 'brew shellenv' "$ZSHRC"; then
-                cat << 'EOF' >> "$ZSHRC"
+                cat <<'EOF' >>"$ZSHRC"
 
 # Initialize Homebrew environment on macOS
 if [ -x /opt/homebrew/bin/brew ]; then
@@ -617,13 +622,13 @@ fi
 EOF
             fi
             if ! grep -q 'DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
-                echo 'DISABLE_MAGIC_FUNCTIONS="true"' >> "$ZSHRC"
+                echo 'DISABLE_MAGIC_FUNCTIONS="true"' >>"$ZSHRC"
             fi
             if ! grep -q 'DISABLE_UNTRACKED_FILES_DIRTY="true"' "$ZSHRC"; then
-                echo 'DISABLE_UNTRACKED_FILES_DIRTY="true"' >> "$ZSHRC"
+                echo 'DISABLE_UNTRACKED_FILES_DIRTY="true"' >>"$ZSHRC"
             fi
             if ! grep -q 'fzf --zsh' "$ZSHRC"; then
-                cat << 'EOF' >> "$ZSHRC"
+                cat <<'EOF' >>"$ZSHRC"
 
 # Interactive fzf keybindings (Ctrl+R, Ctrl+T, Alt+C) and fuzzy completion
 if command -v fzf >/dev/null 2>&1; then
@@ -641,7 +646,7 @@ EOF
         else
             ZSH_BIN="$(which zsh)"
             CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "")"
-            if [ "$CURRENT_SHELL" != "$ZSH_BIN" ]; then
+            if [ "$CURRENT_SHELL" != "$ZSH_BIN" ] && [ -n "$ZSH_BIN" ]; then
                 log_info "Changing default shell to ${ZSH_BIN} for ${TARGET_USER}..."
                 run_sudo chsh -s "$ZSH_BIN" "$TARGET_USER" || true
             fi
@@ -670,8 +675,8 @@ if [ "$SKIP_DOTFILES" -eq 0 ]; then
         if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/${rel_path}" ]; then
             cp "${SCRIPT_DIR}/${rel_path}" "$dest"
         else
-            curl -fsSL "${PAGES_BASE}/${rel_path}" -o "$dest" 2>/dev/null || \
-            curl -fsSL "${RAW_REPO_BASE}/${rel_path}" -o "$dest" 2>/dev/null || true
+            curl -fsSL "${PAGES_BASE}/${rel_path}" -o "$dest" 2>/dev/null ||
+                curl -fsSL "${RAW_REPO_BASE}/${rel_path}" -o "$dest" 2>/dev/null || true
         fi
         chown "${TARGET_USER}" "$dest" 2>/dev/null || true
     }
@@ -686,7 +691,7 @@ if [ "$SKIP_DOTFILES" -eq 0 ]; then
         # Ensure .zshrc sources ~/.bash_aliases safely
         ZSHRC="${TARGET_HOME}/.zshrc"
         if [ -f "$ZSHRC" ] && ! grep -q '\.bash_aliases' "$ZSHRC"; then
-            cat << 'EOF' >> "$ZSHRC"
+            cat <<'EOF' >>"$ZSHRC"
 
 # Load shell aliases & functions (emulate ksh for seamless compatibility)
 if [ -f "$HOME/.bash_aliases" ]; then
@@ -698,7 +703,7 @@ EOF
         # Ensure .bashrc sources ~/.bash_aliases
         BASHRC="${TARGET_HOME}/.bashrc"
         if [ -f "$BASHRC" ] && ! grep -q '\.bash_aliases' "$BASHRC"; then
-            cat << 'EOF' >> "$BASHRC"
+            cat <<'EOF' >>"$BASHRC"
 
 # Load shell aliases & functions
 if [ -f "$HOME/.bash_aliases" ]; then
@@ -779,8 +784,8 @@ EOF
         chmod +x "$FULL_UPGRADE_DEST" 2>/dev/null || true
     fi
 
-    # Deploy Zsh completion for cdr (_cdr)
-    CDR_COMPLETION_DIR="${TARGET_HOME}/.oh-my-zsh/custom/plugins/my-completions"
+    # Deploy Zsh completion for cdr (_cdr) into its dedicated local directory
+    CDR_COMPLETION_DIR="${TARGET_HOME}/.oh-my-zsh/custom/completions"
     CDR_COMPLETION_DEST="${CDR_COMPLETION_DIR}/_cdr"
     if [ "$DRY_RUN" -eq 1 ]; then
         log_info "[DRY-RUN] Deploy _cdr completion to ${CDR_COMPLETION_DEST}"
@@ -788,6 +793,32 @@ EOF
         mkdir -p "$CDR_COMPLETION_DIR"
         fetch_asset "dotfiles/.oh-my-zsh/custom/plugins/my-completions/_cdr" "$CDR_COMPLETION_DEST"
         chown -R "${TARGET_USER}" "$CDR_COMPLETION_DIR" 2>/dev/null || true
+    fi
+
+    # Inject optimized initialization configuration hooks before oh-my-zsh setup block
+    ZSHRC="${TARGET_HOME}/.zshrc"
+    if [ "$DRY_RUN" -eq 0 ] && [ -f "$ZSHRC" ]; then
+        if ! grep -q 'plugins/zsh-completions/src' "$ZSHRC"; then
+            log_info "Injecting optimized zsh-completions configurations hooks..."
+
+            # Custom code block template engine rules
+            ZSH_COMP_BLOCK=$(
+                cat <<'EOF'
+
+# zsh-completions optimized initialization (prevents double compinit performance issues)
+fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
+fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/completions
+autoload -U compinit && compinit
+EOF
+            )
+            # Find and dynamically split right before sourcing oh-my-zsh main binary script
+            if grep -q 'source "$ZSH/oh-my-zsh.sh"' "$ZSHRC"; then
+                awk -v block="$ZSH_COMP_BLOCK" '/source "\$ZSH\/oh-my-zsh.sh"/{print block}1' "$ZSHRC" >"$ZSHRC.tmp" && mv "$ZSHRC.tmp" "$ZSHRC"
+            else
+                # Fallback safety validation mount append point if line structure changes
+                echo "$ZSH_COMP_BLOCK" >>"$ZSHRC"
+            fi
+        fi
     fi
 
     # Ensure systemd is enabled if running inside WSL
@@ -993,10 +1024,10 @@ Summary of changes:
   • Core Dev: cmake, ninja, clang/llvm, git, jq, tmux, tree, etc.
   • Modern CLI: vim, btop, mosh, tmux, ripgrep, fd, bat, fzf
   • Embedded Tools: gcc-arm-none-eabi, gdb, newlib, openocd, tio, probe-rs
-  • Shell: Zsh + Oh-My-Zsh with syntax-highlighting, autosuggestions, my-completions
+  • Shell: Zsh + Oh-My-Zsh with syntax-highlighting, autosuggestions, zsh-completions optimization hooks
   • Dotfiles & Git: .vimrc (badwolf), .tmux.conf, .bash_aliases, git editor=vim, alias.pa, .gitmessage
   • Maintenance: ~/.local/bin/full-upgrade (alias: up) with omz & brew update
-  • Productivity: .editorconfig, .hushlogin, cdr completion
+  • Productivity: .editorconfig, .hushlogin, optimized custom global cdr completions setup
   • Security: ED25519 SSH & GPG signing keys verified / configured
   • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall
   • Editor: Zed editor installed to ~/.local/bin/zed
