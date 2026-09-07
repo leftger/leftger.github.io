@@ -634,12 +634,12 @@ EOF
         run_user "git config --global alias.cob 'checkout -b'"
         run_user "git config --global alias.apply-gitignore '!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f'"
 
-        # Install pull-all alias
-        PULL_ALL_CMD='!f() { [ -d "$1" ] && { d="$1"; shift; } || d="."; for r in "$d"/*/; do [ -e "$r/.git" ] || continue; b=$(git -C "$r" branch --show-current 2>/dev/null); [ -n "$b" ] || continue; echo "==> $(basename "$r") ($b)..."; git -C "$r" config remote.upstream.url >/dev/null 2>&1 && git -C "$r" pull upstream "$b" "$@"; git -C "$r" pull origin "$b" "$@"; done; }; f'
-        run_user "git config --global alias.pull-all '$PULL_ALL_CMD'"
+        # Install pa alias
+        PA_CMD='!f() { [ -d "$1" ] && { d="$1"; shift; } || d="."; for r in "$d"/*/; do [ -e "$r/.git" ] || continue; b=$(git -C "$r" branch --show-current 2>/dev/null); [ -n "$b" ] || continue; echo "==> $(basename "$r") ($b)..."; git -C "$r" config remote.upstream.url >/dev/null 2>&1 && git -C "$r" pull upstream "$b" "$@"; git -C "$r" pull origin "$b" "$@"; done; }; f'
+        run_user "git config --global alias.pa '$PA_CMD'"
     fi
 
-    log_success "Dotfiles configured (.vimrc, themes, aliases, and Git pull-all configured)"
+    log_success "Dotfiles configured (.vimrc, themes, aliases, and Git pa configured)"
 else
     log_info "Skipping dotfiles setup (--skip-dotfiles specified)"
 fi
@@ -719,7 +719,7 @@ Summary of changes:
   • Embedded ARM: gcc-arm-none-eabi, gdb-multiarch, newlib libraries
   • Hardware Access: ${TARGET_USER} added to dialout and plugdev; probe-rs udev rules installed
   • Shell: Zsh + Oh-My-Zsh with syntax-highlighting and autosuggestions
-  • Dotfiles & Git: .vimrc (badwolf), .bash_aliases, git editor=vim, alias.pull-all
+  • Dotfiles & Git: .vimrc (badwolf), .bash_aliases, git editor=vim, alias.pa
   • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall
 
 Next steps:

@@ -21,4 +21,4 @@
 	caane = commit --amend --all --no-edit
 	cob = checkout -b
 	apply-gitignore = "!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f"
-	pull-all = "!f() { [ -d \"$1\" ] && { d=\"$1\"; shift; } || d=\".\"; for r in \"$d\"/*/; do [ -e \"$r/.git\" ] || continue; b=$(git -C \"$r\" branch --show-current 2>/dev/null); [ -n \"$b\" ] || continue; echo \"==> $(basename \"$r\") ($b)...\"; git -C \"$r\" config remote.upstream.url >/dev/null 2>&1 && git -C \"$r\" pull upstream \"$b\" \"$@\"; git -C \"$r\" pull origin \"$b\" \"$@\"; done; }; f"
+	pa = "!f() { [ -d \"$1\" ] && { d=\"$1\"; shift; } || d=\".\"; for r in \"$d\"/*/; do [ -e \"$r/.git\" ] || continue; b=$(git -C \"$r\" branch --show-current 2>/dev/null); [ -n \"$b\" ] || continue; echo \"==> $(basename \"$r\") ($b)...\"; git -C \"$r\" config remote.upstream.url >/dev/null 2>&1 && git -C \"$r\" pull upstream \"$b\" \"$@\"; git -C \"$r\" pull origin \"$b\" \"$@\"; done; }; f"

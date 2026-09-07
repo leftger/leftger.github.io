@@ -35,7 +35,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
    - `~/.vimrc` with Badwolf theme, line numbers, automatic trailing whitespace stripping, and 4-space indentation.
    - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
    - Global `~/.gitignore` (`core.excludesfile`) for OS, editor, and log artifacts.
-   - Git defaults & productivity: `core.editor = vim`, `init.defaultBranch = main`, `push.autoSetupRemote = true`, `rebase.autoStash = true`, `merge.autoStash = true`, `git caane`, `git caa`, `git cob`, `git apply-gitignore`, and `git pull-all`.
+   - Git defaults & productivity: `core.editor = vim`, `init.defaultBranch = main`, `push.autoSetupRemote = true`, `rebase.autoStash = true`, `merge.autoStash = true`, `git caane`, `git caa`, `git cob`, `git apply-gitignore`, and `git pa`.
 9. **Rust Ecosystem**: `rustup` stable toolchain, Cortex-M targets (`thumbv6m`, `thumbv7m`, `thumbv7em`, `thumbv7em-none-eabihf`, `thumbv8m.main-none-eabihf`), RISC-V targets, `probe-rs`, `cargo-binstall`, `cargo-deny`, and `cargo-llvm-cov`.
 
 ---
