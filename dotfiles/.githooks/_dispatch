@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Global Git hook dispatcher.
+#
+# Installed as core.hooksPath (~/.githooks). Each hook name is a symlink to this
+# script. Global behavior runs first, then control is forwarded to a matching
+# executable (or bash script) at ./.githooks/<hook-name> when present.
+set -euo pipefail
+
+HOOK_NAME="$(basename "$0")"
+
+# Seed .editorconfig into the worktree when missing (branch checkouts / clones).
+if [ "$HOOK_NAME" = "post-checkout" ]; then
+    # $3 == 1 for branch checkouts (including clone); 0 for file checkouts.
+    if [ "${3:-0}" = "1" ] && [ ! -f "./.editorconfig" ]; then
+        src="${HOME}/.git_template/root/.editorconfig"
+        if [ ! -f "$src" ]; then
+            src="${HOME}/.editorconfig"
+        fi
+        if [ -f "$src" ]; then
+            cp "$src" "./.editorconfig"
+            echo "[Git Template] Deployed global .editorconfig to project root."
+        fi
+    fi
+fi
+
+LOCAL_HOOK="./.githooks/${HOOK_NAME}"
+if [ -f "$LOCAL_HOOK" ]; then
+    if [ -x "$LOCAL_HOOK" ]; then
+        exec "$LOCAL_HOOK" "$@"
+    fi
+    exec bash "$LOCAL_HOOK" "$@"
+fi
+
+exit 0

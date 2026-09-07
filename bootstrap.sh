@@ -18,6 +18,7 @@
 #   7. Hardware access: dialout & plugdev groups, probe-rs udev rules (Linux)
 #   8. Shell setup: Zsh + Oh-My-Zsh with autosuggestions & syntax highlighting
 #   9. Curated Dotfiles: .vimrc, .tmux.conf, .editorconfig, .hushlogin, .gitmessage,
+#      ~/.githooks dispatcher (forwards to ./.githooks), ~/.git_template,
 #      unified full-upgrade script (alias: up), and shell aliases
 #  10. Rust toolchain: rustup (stable), Cortex-M/RISC-V/Wasm targets,
 #      probe-rs tools, cargo-binstall, cargo-deny, cargo-llvm-cov
@@ -765,6 +766,37 @@ EOF
         fetch_asset "dotfiles/.editorconfig" "$EDITORCONFIG_DEST"
     fi
 
+    # Deploy global Git hooks dispatcher (~/.githooks) — forwards to ./.githooks/*
+    GITHOOKS_DIR="${TARGET_HOME}/.githooks"
+    GIT_HOOK_NAMES=(
+        applypatch-msg pre-applypatch post-applypatch
+        pre-commit prepare-commit-msg commit-msg post-commit
+        pre-rebase post-checkout post-merge pre-push
+        pre-auto-gc post-rewrite push-to-checkout sendemail-validate
+    )
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy global Git hooks dispatcher to ${GITHOOKS_DIR}"
+    else
+        mkdir -p "$GITHOOKS_DIR"
+        fetch_asset "dotfiles/.githooks/_dispatch" "${GITHOOKS_DIR}/_dispatch"
+        chmod +x "${GITHOOKS_DIR}/_dispatch" 2>/dev/null || true
+        for hook in "${GIT_HOOK_NAMES[@]}"; do
+            ln -sfn _dispatch "${GITHOOKS_DIR}/${hook}"
+        done
+        chown -R "${TARGET_USER}" "$GITHOOKS_DIR" 2>/dev/null || true
+    fi
+
+    # Deploy Git init template (editorconfig seed source for post-checkout)
+    GIT_TEMPLATE_DIR="${TARGET_HOME}/.git_template"
+    GIT_TEMPLATE_EDITORCONFIG="${GIT_TEMPLATE_DIR}/root/.editorconfig"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy Git template editorconfig to ${GIT_TEMPLATE_EDITORCONFIG}"
+    else
+        mkdir -p "${GIT_TEMPLATE_DIR}/root"
+        fetch_asset "dotfiles/.git_template/root/.editorconfig" "$GIT_TEMPLATE_EDITORCONFIG"
+        chown -R "${TARGET_USER}" "$GIT_TEMPLATE_DIR" 2>/dev/null || true
+    fi
+
     # Deploy .hushlogin (silence login MOTD)
     HUSHLOGIN_DEST="${TARGET_HOME}/.hushlogin"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -836,11 +868,12 @@ EOF
     # Configure Git Defaults, Core Settings, and Aliases
     log_info "Configuring Git defaults, push settings, commit template, and aliases..."
     if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Set git core, push.autoSetupRemote, rebase/merge autoStash, commit template, and aliases"
+        log_info "[DRY-RUN] Set git core (hooksPath=~/.githooks, templateDir), push.autoSetupRemote, rebase/merge autoStash, commit template, and aliases"
     else
         run_user "git config --global core.editor vim"
         run_user "git config --global init.defaultBranch main"
-        run_user "git config --global core.hooksPath .githooks"
+        run_user "git config --global init.templateDir '${TARGET_HOME}/.git_template'"
+        run_user "git config --global core.hooksPath '${TARGET_HOME}/.githooks'"
         run_user "git config --global core.excludesfile ~/.gitignore"
         run_user "git config --global commit.template ~/.gitmessage"
         run_user "git config --global commit.cleanup strip"
@@ -927,7 +960,7 @@ EOF
         fi
     fi
 
-    log_success "Dotfiles configured (.vimrc, themes, aliases, and Git pa configured)"
+    log_success "Dotfiles configured (.vimrc, themes, aliases, ~/.githooks dispatcher, and Git pa configured)"
 else
     log_info "Skipping dotfiles setup (--skip-dotfiles specified)"
 fi
@@ -1026,6 +1059,7 @@ Summary of changes:
   • Embedded Tools: gcc-arm-none-eabi, gdb, newlib, openocd, tio, probe-rs
   • Shell: Zsh + Oh-My-Zsh with syntax-highlighting, autosuggestions, zsh-completions optimization hooks
   • Dotfiles & Git: .vimrc (badwolf), .tmux.conf, .bash_aliases, git editor=vim, alias.pa, .gitmessage
+  • Git hooks: ~/.githooks dispatcher (seeds .editorconfig, forwards to ./.githooks)
   • Maintenance: ~/.local/bin/full-upgrade (alias: up) with omz & brew update
   • Productivity: .editorconfig, .hushlogin, optimized custom global cdr completions setup
   • Security: ED25519 SSH & GPG signing keys verified / configured

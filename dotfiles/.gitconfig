@@ -1,12 +1,13 @@
 [core]
 	editor = vim
-	hooksPath = .githooks
+	hooksPath = ~/.githooks
 	excludesfile = ~/.gitignore
 [user]
 	name = Gerzain Mata
 	email = leftger@gmail.com
 [init]
 	defaultBranch = main
+	templateDir = ~/.git_template
 [push]
 	autoSetupRemote = true
 [rebase]
