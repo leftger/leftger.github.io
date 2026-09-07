@@ -203,7 +203,7 @@ if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
 fi
 
 # Determine script location if running from a local checkout
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE}")" 2>/dev/null && pwd || echo "")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 run_cmd() {
     if [ "$DRY_RUN" -eq 1 ]; then
