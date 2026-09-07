@@ -24,19 +24,27 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
 1. **System Maintenance**: `apt update`, `full-upgrade`, `dist-upgrade`, `autoremove` (non-interactive, config-preserving).
 2. **Localization & Timezone**: `en_US.UTF-8` generated and set system-wide; timezone set to `America/Phoenix` (configurable).
 3. **Core Development**: `build-essential`, `cmake`, `ninja-build`, `clang`, `lld`, `llvm`, `pkg-config`, `libssl-dev`, `git`, `git-lfs`, `jq`, `tmux`, `tree`.
-4. **Modern CLI Productivity**: `vim`, `btop`, `mosh`, `binutils`, `ripgrep`, `fd-find` (`fd`), `bat` (`bat`), `fzf`.
+4. **Modern CLI Productivity**: `vim`, `btop`, `mosh`, `binutils`, `ripgrep`, `fd-find` (`fd`), `bat` (`bat`), `fzf` (with Ctrl+R, Ctrl+T, Alt+C shell integration).
 5. **Embedded ARM Toolchain**: `gcc-arm-none-eabi`, `binutils-arm-none-eabi`, `libnewlib-arm-none-eabi`, `libstdc++-arm-none-eabi-newlib`, `gdb-multiarch`.
 6. **Hardware Access**: Adds user to `dialout` and `plugdev` groups; installs `probe-rs` udev rules for CMSIS-DAP, ST-Link, and J-Link debuggers.
 7. **Shell & Terminal**: `zsh` + Oh-My-Zsh configured as default user shell with plugins:
-   - `git`, `sudo`, `cargo`, `rust`, `extract`, `z`, `colored-man-pages`, `command-not-found`, `zsh-autosuggestions`, `zsh-syntax-highlighting`.
-   - URL paste fix (`DISABLE_MAGIC_FUNCTIONS="true"`) to prevent URL escaping bugs.
+   - `git`, `sudo`, `cargo`, `rust`, `extract`, `z`, `colored-man-pages`, `command-not-found`, `zsh-autosuggestions`, `zsh-syntax-highlighting`, `my-completions` (dynamic `cdr <TAB>` completion).
+   - Fast prompt response (`DISABLE_UNTRACKED_FILES_DIRTY="true"`).
+   - URL paste fix (`DISABLE_MAGIC_FUNCTIONS="true"`).
+   - VS Code integrated terminal shell integration hook.
    - Safe POSIX alias sourcing with `emulate ksh`.
 8. **Curated Dotfiles & Utilities**:
    - `~/.vimrc` with Badwolf theme, line numbers, automatic trailing whitespace stripping, and 4-space indentation.
-   - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
+   - `~/.tmux.conf` with mouse support, TrueColor, 10,000 line scrollback, vi mode keys, and GitHub dark theme status bar.
+   - `~/.gitmessage` standard conventional commit template.
+   - `~/.editorconfig` standard cross-editor formatting rules.
+   - `~/.hushlogin` to silence distracting login MOTD banners.
+   - `~/.local/bin/full-upgrade` (alias: `up`): one-stop unattended updater for APT, Rust, Zed, Flatpak, Snap, pipx, npm, and WSL.
+   - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`, `up`), WSL interop (`cdw`, `exp`, `BROWSER="wslview"`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
    - Global `~/.gitignore` (`core.excludesfile`) for OS, editor, and log artifacts.
    - Git defaults & productivity: `core.editor = vim`, `init.defaultBranch = main`, `push.autoSetupRemote = true`, `rebase.autoStash = true`, `merge.autoStash = true`, `git caane`, `git caa`, `git cob`, `git apply-gitignore`, and `git pa`.
 9. **Rust Ecosystem**: `rustup` stable toolchain, Cortex-M targets (`thumbv6m`, `thumbv7m`, `thumbv7em`, `thumbv7em-none-eabihf`, `thumbv8m.main-none-eabihf`), RISC-V targets, `probe-rs`, `cargo-binstall`, `cargo-deny`, and `cargo-llvm-cov`.
+10. **Zed Editor**: Installs latest stable release of high-performance [Zed](https://zed.dev) editor to `~/.local/bin/zed`.
 
 ---
 
@@ -48,8 +56,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
 | `--skip-upgrade` | Skip `apt full-upgrade` and `apt dist-upgrade` | `false` |
 | `--skip-embedded` | Skip ARM GCC toolchain, probe-rs, and udev rules | `false` |
 | `--skip-rust` | Skip Rust toolchain and cargo tools | `false` |
+| `--skip-zed` | Skip Zed editor installation | `false` |
 | `--skip-zsh` | Skip Zsh, Oh-My-Zsh, and shell change | `false` |
 | `--skip-tools` | Skip modern CLI productivity tools | `false` |
-| `--skip-dotfiles` | Skip curated .vimrc, themes, and shell aliases | `false` |
+| `--skip-dotfiles` | Skip curated dotfiles, tmux, vim, and shell aliases | `false` |
 | `--dry-run` | Print proposed actions without making modifications | `false` |
 | `-h`, `--help` | Display help screen and exit | |
+

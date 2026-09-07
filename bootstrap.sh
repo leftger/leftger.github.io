@@ -50,6 +50,7 @@ SKIP_RUST=0
 SKIP_ZSH=0
 SKIP_TOOLS=0
 SKIP_DOTFILES=0
+SKIP_ZED=0
 DRY_RUN=0
 
 # Color formatting
@@ -102,6 +103,7 @@ Options:
       --skip-upgrade    Skip apt full-upgrade / dist-upgrade
       --skip-embedded   Skip ARM Cortex-M toolchain and probe-rs setup
       --skip-rust       Skip Rust toolchain and cargo utilities installation
+      --skip-zed        Skip Zed editor installation
       --skip-zsh        Skip Oh-My-Zsh installation and shell change
       --skip-tools      Skip modern CLI utilities installation
       --skip-dotfiles   Skip curated .vimrc, themes, and shell aliases
@@ -130,6 +132,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-rust)
             SKIP_RUST=1
+            shift
+            ;;
+        --skip-zed)
+            SKIP_ZED=1
             shift
             ;;
         --skip-zsh)
@@ -457,7 +463,7 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
 
     # Configure ~/.zshrc
     ZSHRC="${TARGET_HOME}/.zshrc"
-    TARGET_PLUGINS="git sudo cargo rust extract z colored-man-pages command-not-found zsh-autosuggestions zsh-syntax-highlighting"
+    TARGET_PLUGINS="git sudo cargo rust extract z colored-man-pages command-not-found zsh-autosuggestions zsh-syntax-highlighting my-completions"
     if [ "$DRY_RUN" -eq 1 ]; then
         log_info "[DRY-RUN] Configure plugins (${TARGET_PLUGINS}) and PATH in ${ZSHRC}"
     else
@@ -475,12 +481,24 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
             if ! grep -q 'DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
                 echo 'DISABLE_MAGIC_FUNCTIONS="true"' >> "$ZSHRC"
             fi
+            if ! grep -q 'DISABLE_UNTRACKED_FILES_DIRTY="true"' "$ZSHRC"; then
+                echo 'DISABLE_UNTRACKED_FILES_DIRTY="true"' >> "$ZSHRC"
+            fi
             if ! grep -q 'fzf --zsh' "$ZSHRC"; then
                 cat << 'EOF' >> "$ZSHRC"
 
 # Interactive fzf keybindings (Ctrl+R, Ctrl+T, Alt+C) and fuzzy completion
 if command -v fzf >/dev/null 2>&1; then
     eval "$(fzf --zsh 2>/dev/null || true)"
+fi
+EOF
+            fi
+            if ! grep -q 'locate-shell-integration-path' "$ZSHRC"; then
+                cat << 'EOF' >> "$ZSHRC"
+
+# VS Code shell integration (if running inside VS Code terminal)
+if [[ "${TERM_PROGRAM}" == "vscode" ]] && command -v code >/dev/null 2>&1; then
+    source "$(code --locate-shell-integration-path zsh 2>/dev/null || true)"
 fi
 EOF
             fi
@@ -603,6 +621,56 @@ EOF
         fetch_asset "dotfiles/.tmux.conf" "$TMUX_DEST"
     fi
 
+    # Deploy .editorconfig
+    EDITORCONFIG_DEST="${TARGET_HOME}/.editorconfig"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy .editorconfig to ${EDITORCONFIG_DEST}"
+    else
+        fetch_asset "dotfiles/.editorconfig" "$EDITORCONFIG_DEST"
+    fi
+
+    # Deploy .hushlogin (silence login MOTD)
+    HUSHLOGIN_DEST="${TARGET_HOME}/.hushlogin"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy .hushlogin to ${HUSHLOGIN_DEST}"
+    else
+        touch "$HUSHLOGIN_DEST"
+        chown "${TARGET_USER}:${TARGET_USER}" "$HUSHLOGIN_DEST" 2>/dev/null || true
+    fi
+
+    # Deploy full-upgrade script
+    FULL_UPGRADE_DEST="${TARGET_HOME}/.local/bin/full-upgrade"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy full-upgrade script to ${FULL_UPGRADE_DEST}"
+    else
+        mkdir -p "${TARGET_HOME}/.local/bin"
+        fetch_asset "dotfiles/bin/full-upgrade" "$FULL_UPGRADE_DEST"
+        chmod +x "$FULL_UPGRADE_DEST" 2>/dev/null || true
+    fi
+
+    # Deploy Zsh completion for cdr (_cdr)
+    CDR_COMPLETION_DIR="${TARGET_HOME}/.oh-my-zsh/custom/plugins/my-completions"
+    CDR_COMPLETION_DEST="${CDR_COMPLETION_DIR}/_cdr"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy _cdr completion to ${CDR_COMPLETION_DEST}"
+    else
+        mkdir -p "$CDR_COMPLETION_DIR"
+        fetch_asset "dotfiles/.oh-my-zsh/custom/plugins/my-completions/_cdr" "$CDR_COMPLETION_DEST"
+        chown -R "${TARGET_USER}:${TARGET_USER}" "$CDR_COMPLETION_DIR" 2>/dev/null || true
+    fi
+
+    # Ensure systemd is enabled if running inside WSL
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Ensure boot.systemd=true in /etc/wsl.conf"
+        else
+            if [ ! -f /etc/wsl.conf ] || ! grep -q "systemd=true" /etc/wsl.conf 2>/dev/null; then
+                log_info "Configuring systemd in /etc/wsl.conf for WSL..."
+                run_sudo bash -c 'printf "[boot]\nsystemd=true\n" >> /etc/wsl.conf' || true
+            fi
+        fi
+    fi
+
     # Configure Git Defaults, Core Settings, and Aliases
     log_info "Configuring Git defaults, push settings, commit template, and aliases..."
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -703,6 +771,26 @@ else
 fi
 
 # ------------------------------------------------------------------------------
+# Step 10: Zed Editor
+# ------------------------------------------------------------------------------
+if [ "$SKIP_ZED" -eq 0 ]; then
+    log_step "Installing Zed Editor"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Install Zed editor via curl -f https://zed.dev/install.sh | sh"
+    else
+        if ! run_user "command -v zed >/dev/null 2>&1" && [ ! -f "${TARGET_HOME}/.local/bin/zed" ]; then
+            log_info "Installing Zed editor..."
+            run_user "curl -f https://zed.dev/install.sh | sh || true"
+            log_success "Zed editor installed"
+        else
+            log_info "Zed editor is already installed at $(run_user 'command -v zed 2>/dev/null' || echo "${TARGET_HOME}/.local/bin/zed")"
+        fi
+    fi
+else
+    log_info "Skipping Zed setup (--skip-zed specified)"
+fi
+
+# ------------------------------------------------------------------------------
 # Summary & Completion
 # ------------------------------------------------------------------------------
 printf "\n${BOLD}${GREEN}================================================================${RESET}\n"
@@ -719,8 +807,11 @@ Summary of changes:
   • Embedded ARM: gcc-arm-none-eabi, gdb-multiarch, newlib libraries
   • Hardware Access: ${TARGET_USER} added to dialout and plugdev; probe-rs udev rules installed
   • Shell: Zsh + Oh-My-Zsh with syntax-highlighting and autosuggestions
-  • Dotfiles & Git: .vimrc (badwolf), .bash_aliases, git editor=vim, alias.pa
+  • Dotfiles & Git: .vimrc (badwolf), .bash_aliases, git editor=vim, alias.pa, .gitmessage
+  • Maintenance: ~/.local/bin/full-upgrade (alias: up)
+  • Productivity: .editorconfig, .hushlogin, cdr completion, WSL interop
   • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall
+  • Editor: Zed editor installed to ~/.local/bin/zed
 
 Next steps:
   1. If group permissions changed, log out and back in:
@@ -729,3 +820,4 @@ Next steps:
        $ exec zsh
   3. Happy hacking! 🦀⚡
 EOF
+

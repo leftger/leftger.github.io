@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Unified System & Toolchain Upgrade Script
+# Author: Gerzain (https://github.com/leftger)
+# ==============================================================================
+
+set -euo pipefail
+
+# ANSI color codes
+BOLD="\033[1m"
+GREEN="\033[0;32m"
+BLUE="\033[0;34m"
+YELLOW="\033[0;33m"
+CYAN="\033[0;36m"
+RED="\033[0;31m"
+RESET="\033[0m"
+
+log_section() {
+    printf "\n%b==> %s%b\n" "${BOLD}${BLUE}" "$*" "${RESET}"
+}
+
+log_info() {
+    printf "%b[INFO]%b %s\n" "${CYAN}" "${RESET}" "$*"
+}
+
+log_success() {
+    printf "%b[✓]%b %s\n" "${GREEN}" "${RESET}" "$*"
+}
+
+log_warn() {
+    printf "%b[WARN]%b %s\n" "${YELLOW}" "${RESET}" "$*"
+}
+
+log_error() {
+    printf "%b[ERROR]%b %s\n" "${RED}" "${RESET}" "$*" >&2
+}
+
+# Request sudo credentials early if available
+if command -v sudo >/dev/null 2>&1; then
+    sudo -v
+fi
+
+# 1. APT Packages (Debian / Ubuntu)
+if command -v apt-get >/dev/null 2>&1; then
+    log_section "Updating APT package index & system upgrades"
+    export DEBIAN_FRONTEND=noninteractive
+    sudo apt-get update -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    sudo apt-get full-upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    sudo apt-get dist-upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    sudo apt-get autoremove -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+    log_success "APT packages successfully updated"
+fi
+
+# 2. Rust Toolchains & Components
+if command -v rustup >/dev/null 2>&1; then
+    log_section "Updating Rust toolchain (rustup)"
+    rustup update stable || true
+    if command -v cargo-binstall >/dev/null 2>&1; then
+        log_info "Upgrading cargo tools..."
+        cargo binstall --no-confirm --continue-on-failure cargo-deny cargo-llvm-cov cargo-generate || true
+    fi
+    log_success "Rust toolchain up to date"
+fi
+
+# 3. Zed Editor
+if command -v zed >/dev/null 2>&1 || [ -f "${HOME}/.local/bin/zed" ]; then
+    log_section "Updating Zed Editor"
+    curl -f https://zed.dev/install.sh | sh || log_warn "Zed update check completed with non-zero exit"
+    log_success "Zed editor up to date"
+fi
+
+# 4. Snap Packages
+if command -v snap >/dev/null 2>&1; then
+    log_section "Updating Snap packages"
+    sudo snap refresh || true
+    log_success "Snap packages updated"
+fi
+
+# 5. Flatpak Packages
+if command -v flatpak >/dev/null 2>&1; then
+    log_section "Updating Flatpak packages"
+    flatpak update --user -y || true
+    if command -v sudo >/dev/null 2>&1; then
+        sudo flatpak update --system -y || true
+    fi
+    log_success "Flatpak packages updated"
+fi
+
+# 6. Python pipx Packages
+if command -v pipx >/dev/null 2>&1; then
+    log_section "Updating Python pipx packages"
+    pipx upgrade-all || true
+    log_success "pipx packages updated"
+fi
+
+# 7. Node / NPM Global Packages
+if command -v npm >/dev/null 2>&1; then
+    log_section "Updating global npm packages"
+    npm update -g || true
+    log_success "npm packages updated"
+fi
+
+# 8. WSL & Windows Terminal (if running inside WSL)
+if command -v wsl.exe >/dev/null 2>&1; then
+    log_section "Checking WSL and Windows updates"
+    wsl.exe --update || true
+    if command -v winget.exe >/dev/null 2>&1; then
+        winget.exe upgrade --exact --id Microsoft.VisualStudioCode --source winget --accept-source-agreements --disable-interactivity || true
+    fi
+    log_success "WSL checks completed"
+fi
+
+printf "\n%b================================================================%b\n" "${BOLD}${GREEN}" "${RESET}"
+printf "%b             All System Upgrades Complete!                      %b\n" "${BOLD}${GREEN}" "${RESET}"
+printf "%b================================================================%b\n\n" "${BOLD}${GREEN}" "${RESET}"

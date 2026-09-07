@@ -1,0 +1,16 @@
+#compdef cdr
+
+local -a search_dirs
+local d
+
+for d in "${HOME}/Projects/my-repos" "${HOME}/Projects" "${HOME}/repos"; do
+    if [ -d "$d" ]; then
+        search_dirs+=("$d")
+    fi
+done
+
+if (( ${#search_dirs[@]} > 0 )); then
+    _path_files -W "(${search_dirs[*]})" -/
+else
+    _message "no projects directory found"
+fi
