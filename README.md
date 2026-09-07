@@ -42,8 +42,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
    - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`, `up`), WSL interop (`cdw`, `exp`, `BROWSER="wslview"`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
    - Global `~/.gitignore` (`core.excludesfile`) for OS, editor, and log artifacts.
    - Git defaults & productivity: `core.editor = vim`, `init.defaultBranch = main`, `push.autoSetupRemote = true`, `rebase.autoStash = true`, `merge.autoStash = true`, `git caane`, `git caa`, `git cob`, `git apply-gitignore`, and `git pa`.
-9. **Rust Ecosystem**: `rustup` stable toolchain, Cortex-M targets (`thumbv6m`, `thumbv7m`, `thumbv7em`, `thumbv7em-none-eabihf`, `thumbv8m.main-none-eabihf`), RISC-V targets, `probe-rs`, `cargo-binstall`, `cargo-deny`, and `cargo-llvm-cov`.
-10. **Zed Editor**: Installs latest stable release of high-performance [Zed](https://zed.dev) editor to `~/.local/bin/zed`.
+9. **Security & Cryptographic Keys**:
+   - Automated check and creation of `ed25519` SSH key (`~/.ssh/id_ed25519`) if no SSH keys are present.
+   - Automated creation of `ed25519` GPG key if none exists, auto-configuring `git commit.gpgsign true` and `user.signingkey`.
+10. **Rust Ecosystem**: `rustup` stable toolchain, Cortex-M targets (`thumbv6m`, `thumbv7m`, `thumbv7em`, `thumbv7em-none-eabihf`, `thumbv8m.main-none-eabihf`), RISC-V targets, `probe-rs`, `cargo-binstall`, `cargo-deny`, and `cargo-llvm-cov`.
+11. **Zed Editor**: Installs latest stable release of high-performance [Zed](https://zed.dev) editor to `~/.local/bin/zed`.
 
 ---
 
@@ -52,13 +55,14 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
 | Flag | Description | Default |
 | :--- | :--- | :--- |
 | `-t`, `--timezone <TZ>` | Set system timezone | `America/Phoenix` |
-| `--skip-upgrade` | Skip `apt full-upgrade` and `apt dist-upgrade` | `false` |
+| `--skip-upgrade` | Skip package manager and system upgrades | `false` |
 | `--skip-embedded` | Skip ARM GCC toolchain, probe-rs, and udev rules | `false` |
 | `--skip-rust` | Skip Rust toolchain and cargo tools | `false` |
 | `--skip-zed` | Skip Zed editor installation | `false` |
 | `--skip-zsh` | Skip Zsh, Oh-My-Zsh, and shell change | `false` |
 | `--skip-tools` | Skip modern CLI productivity tools | `false` |
 | `--skip-dotfiles` | Skip curated dotfiles, tmux, vim, and shell aliases | `false` |
+| `--skip-keys` | Skip ED25519 SSH and GPG key generation | `false` |
 | `--dry-run` | Print proposed actions without making modifications | `false` |
 | `-h`, `--help` | Display help screen and exit | |
 

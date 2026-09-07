@@ -53,6 +53,7 @@ SKIP_ZSH=0
 SKIP_TOOLS=0
 SKIP_DOTFILES=0
 SKIP_ZED=0
+SKIP_KEYS=0
 DRY_RUN=0
 
 # Color formatting
@@ -109,6 +110,7 @@ Options:
       --skip-zsh        Skip Oh-My-Zsh installation and shell configuration
       --skip-tools      Skip modern CLI utilities installation
       --skip-dotfiles   Skip curated dotfiles, tmux, vim, and shell aliases
+      --skip-keys       Skip ED25519 SSH and GPG key generation
       --dry-run         Print actions without executing commands
   -h, --help            Show this help message and exit
 
@@ -150,6 +152,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-dotfiles)
             SKIP_DOTFILES=1
+            shift
+            ;;
+        --skip-keys)
+            SKIP_KEYS=1
             shift
             ;;
         --dry-run)
@@ -832,6 +838,64 @@ EOF
         run_user "git config --global alias.pa '$PA_CMD'"
     fi
 
+    # --------------------------------------------------------------------------
+    # SSH & GPG Key Configuration (ED25519)
+    # --------------------------------------------------------------------------
+    if [ "$SKIP_KEYS" -eq 0 ]; then
+        log_info "Verifying ED25519 SSH and GPG keys..."
+
+        KEY_USER_NAME="$(run_user 'git config --global user.name' 2>/dev/null || echo 'Gerzain Mata')"
+        KEY_USER_EMAIL="$(run_user 'git config --global user.email' 2>/dev/null || echo 'leftger@gmail.com')"
+
+        # 1. ED25519 SSH Key
+        SSH_DIR="${TARGET_HOME}/.ssh"
+        mkdir -p "$SSH_DIR"
+        chmod 700 "$SSH_DIR"
+        chown "${TARGET_USER}" "$SSH_DIR" 2>/dev/null || true
+
+        if [ ! -f "${SSH_DIR}/id_ed25519" ] && [ ! -f "${SSH_DIR}/id_rsa" ] && [ ! -f "${SSH_DIR}/id_ecdsa" ]; then
+            log_info "No SSH key found. Generating new ED25519 SSH key..."
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log_info "[DRY-RUN] ssh-keygen -t ed25519 -C '${KEY_USER_EMAIL}' -f '${SSH_DIR}/id_ed25519' -N ''"
+            else
+                run_user "ssh-keygen -t ed25519 -C '${KEY_USER_EMAIL}' -f '${SSH_DIR}/id_ed25519' -N ''"
+                chmod 600 "${SSH_DIR}/id_ed25519"
+                chmod 644 "${SSH_DIR}/id_ed25519.pub"
+                chown "${TARGET_USER}" "${SSH_DIR}/id_ed25519" "${SSH_DIR}/id_ed25519.pub" 2>/dev/null || true
+                log_success "ED25519 SSH key generated at ${SSH_DIR}/id_ed25519"
+            fi
+        else
+            log_info "SSH key already present in ${SSH_DIR}"
+        fi
+
+        # 2. ED25519 GPG Key
+        if command -v gpg >/dev/null 2>&1; then
+            if ! run_user "gpg --list-secret-keys 2>/dev/null" | grep -q 'sec'; then
+                log_info "No GPG secret key found. Generating ED25519 GPG key..."
+                if [ "$DRY_RUN" -eq 1 ]; then
+                    log_info "[DRY-RUN] gpg --batch --passphrase '' --quick-generate-key '${KEY_USER_NAME} <${KEY_USER_EMAIL}>' ed25519 default 0"
+                else
+                    run_user "gpg --batch --passphrase '' --quick-generate-key '${KEY_USER_NAME} <${KEY_USER_EMAIL}>' ed25519 default 0"
+                    GPG_KEY_ID="$(run_user "gpg --list-secret-keys --with-colons '${KEY_USER_EMAIL}' 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                    if [ -n "$GPG_KEY_ID" ]; then
+                        run_user "git config --global user.signingkey '$GPG_KEY_ID'"
+                        run_user "git config --global commit.gpgsign true"
+                        run_user "git config --global gpg.program gpg"
+                        log_success "ED25519 GPG key generated (Key ID: ${GPG_KEY_ID}) and configured for Git commit signing"
+                    fi
+                fi
+            else
+                log_info "GPG secret key already present."
+                EXISTING_GPG_KEY="$(run_user "gpg --list-secret-keys --with-colons 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                if [ -n "$EXISTING_GPG_KEY" ] && [ "$DRY_RUN" -eq 0 ]; then
+                    run_user "git config --global user.signingkey '$EXISTING_GPG_KEY'"
+                    run_user "git config --global commit.gpgsign true"
+                    run_user "git config --global gpg.program gpg"
+                fi
+            fi
+        fi
+    fi
+
     log_success "Dotfiles configured (.vimrc, themes, aliases, and Git pa configured)"
 else
     log_info "Skipping dotfiles setup (--skip-dotfiles specified)"
@@ -933,6 +997,7 @@ Summary of changes:
   • Dotfiles & Git: .vimrc (badwolf), .tmux.conf, .bash_aliases, git editor=vim, alias.pa, .gitmessage
   • Maintenance: ~/.local/bin/full-upgrade (alias: up) with omz & brew update
   • Productivity: .editorconfig, .hushlogin, cdr completion
+  • Security: ED25519 SSH & GPG signing keys verified / configured
   • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall
   • Editor: Zed editor installed to ~/.local/bin/zed
 
