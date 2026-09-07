@@ -1,12 +1,28 @@
 # ==============================================================================
-# Shell Productivity Aliases (usable by both bash and zsh)
+# Shell Productivity Aliases & Helpers (usable by both bash and zsh)
 # ==============================================================================
 
-# Directory Navigation
+# Directory Navigation & Utilities
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 alias .....='cd ../../../..'
+
+# Create directory and immediately cd into it
+mcd() {
+    mkdir -p "$1" && cd "$1"
+}
+
+# Quick jump to project repositories
+cdr() {
+    local target="${1:-}"
+    cd "${HOME}/Projects/my-repos/${target}"
+}
+
+# Reload current shell in place
+refreshenv() {
+    exec "${SHELL:-$0}"
+}
 
 # Directory Listings
 alias l='ls -CF'

@@ -1,10 +1,21 @@
 [core]
 	editor = vim
 	hooksPath = .githooks
+	excludesfile = ~/.gitignore
 [user]
 	name = Gerzain Mata
 	email = leftger@gmail.com
 [init]
 	defaultBranch = main
+[push]
+	autoSetupRemote = true
+[rebase]
+	autoStash = true
+[merge]
+	autoStash = true
 [alias]
+	caa = commit --amend --all
+	caane = commit --amend --all --no-edit
+	cob = checkout -b
+	apply-gitignore = "!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f"
 	pull-all = "!f() { \\\n    dir=\".\"; \\\n    if [ -n \"$1\" ] && [ \"${1#-}\" = \"$1\" ]; then \\\n        if [ ! -d \"$1\" ]; then \\\n            echo \"Error: Directory '$1' does not exist.\" >&2; \\\n            return 1 2>/dev/null || exit 1; \\\n        fi; \\\n        dir=\"$1\"; \\\n        shift; \\\n    fi; \\\n    found=0; \\\n    for d in \"$dir\"/*/; do \\\n        [ -e \"$d\" ] || continue; \\\n        if [ -d \"$d/.git\" ] || [ -f \"$d/.git\" ]; then \\\n            found=$((found + 1)); \\\n            repo=$(basename \"$d\"); \\\n            branch=$(git -C \"$d\" branch --show-current 2>/dev/null); \\\n            if [ -n \"$branch\" ]; then \\\n                echo \"==> Pulling $repo ($branch)...\"; \\\n                git -C \"$d\" pull origin \"$branch\" \"$@\" || echo \"    [!] Failed to pull $repo\"; \\\n            else \\\n                echo \"==> $repo: Skipping (HEAD is detached)\"; \\\n            fi; \\\n        fi; \\\n    done; \\\n    if [ \"$found\" -eq 0 ]; then \\\n        echo \"No git repositories found in '$dir'.\"; \\\n    fi; \\\n}; f"

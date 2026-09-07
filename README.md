@@ -29,10 +29,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
 6. **Hardware Access**: Adds user to `dialout` and `plugdev` groups; installs `probe-rs` udev rules for CMSIS-DAP, ST-Link, and J-Link debuggers.
 7. **Shell & Terminal**: `zsh` + Oh-My-Zsh configured as default user shell with plugins:
    - `git`, `sudo`, `cargo`, `rust`, `extract`, `z`, `colored-man-pages`, `command-not-found`, `zsh-autosuggestions`, `zsh-syntax-highlighting`.
-8. **Curated Dotfiles**:
+   - URL paste fix (`DISABLE_MAGIC_FUNCTIONS="true"`) to prevent URL escaping bugs.
+   - Safe POSIX alias sourcing with `emulate ksh`.
+8. **Curated Dotfiles & Utilities**:
    - `~/.vimrc` with Badwolf theme, line numbers, automatic trailing whitespace stripping, and 4-space indentation.
-   - `~/.bash_aliases` with directory navigation (`..`, `...`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
-   - Git defaults: `core.editor = vim`, `init.defaultBranch = main`, and `git pull-all` alias.
+   - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
+   - Global `~/.gitignore` (`core.excludesfile`) for OS, editor, and log artifacts.
+   - Git defaults & productivity: `core.editor = vim`, `init.defaultBranch = main`, `push.autoSetupRemote = true`, `rebase.autoStash = true`, `merge.autoStash = true`, `git caane`, `git caa`, `git cob`, `git apply-gitignore`, and `git pull-all`.
 9. **Rust Ecosystem**: `rustup` stable toolchain, Cortex-M targets (`thumbv6m`, `thumbv7m`, `thumbv7em`, `thumbv7em-none-eabihf`, `thumbv8m.main-none-eabihf`), RISC-V targets, `probe-rs`, `cargo-binstall`, `cargo-deny`, and `cargo-llvm-cov`.
 
 ---

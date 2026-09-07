@@ -472,6 +472,9 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
                 echo '# User custom binary search path' >> "$ZSHRC"
                 echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> "$ZSHRC"
             fi
+            if ! grep -q 'DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
+                echo 'DISABLE_MAGIC_FUNCTIONS="true"' >> "$ZSHRC"
+            fi
         fi
     fi
 
@@ -522,14 +525,14 @@ if [ "$SKIP_DOTFILES" -eq 0 ]; then
     else
         fetch_asset "dotfiles/.bash_aliases" "$BASH_ALIASES_DEST"
 
-        # Ensure .zshrc sources ~/.bash_aliases
+        # Ensure .zshrc sources ~/.bash_aliases safely
         ZSHRC="${TARGET_HOME}/.zshrc"
         if [ -f "$ZSHRC" ] && ! grep -q '\.bash_aliases' "$ZSHRC"; then
             cat << 'EOF' >> "$ZSHRC"
 
-# Load shell aliases
+# Load shell aliases & functions (emulate ksh for seamless compatibility)
 if [ -f "$HOME/.bash_aliases" ]; then
-    . "$HOME/.bash_aliases"
+    emulate ksh -c "source '$HOME/.bash_aliases'"
 fi
 EOF
         fi
@@ -539,7 +542,7 @@ EOF
         if [ -f "$BASHRC" ] && ! grep -q '\.bash_aliases' "$BASHRC"; then
             cat << 'EOF' >> "$BASHRC"
 
-# Load shell aliases
+# Load shell aliases & functions
 if [ -f "$HOME/.bash_aliases" ]; then
     . "$HOME/.bash_aliases"
 fi
@@ -567,14 +570,26 @@ EOF
         fi
     done
 
-    # Configure Git Defaults and Aliases
-    log_info "Configuring Git defaults and aliases (editor: vim, defaultBranch: main, pull-all)..."
+    # Deploy global .gitignore
+    GITIGNORE_DEST="${TARGET_HOME}/.gitignore"
     if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Set git core.editor, init.defaultBranch, core.hooksPath, and alias.pull-all"
+        log_info "[DRY-RUN] Deploy global .gitignore to ${GITIGNORE_DEST}"
+    else
+        fetch_asset "dotfiles/.gitignore" "$GITIGNORE_DEST"
+    fi
+
+    # Configure Git Defaults, Core Settings, and Aliases
+    log_info "Configuring Git defaults, push settings, and aliases..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Set git core, push.autoSetupRemote, rebase/merge autoStash, and aliases"
     else
         run_user "git config --global core.editor vim"
         run_user "git config --global init.defaultBranch main"
         run_user "git config --global core.hooksPath .githooks"
+        run_user "git config --global core.excludesfile ~/.gitignore"
+        run_user "git config --global push.autoSetupRemote true"
+        run_user "git config --global rebase.autoStash true"
+        run_user "git config --global merge.autoStash true"
 
         # Set default git identity if not present
         CURRENT_GIT_NAME="$(run_user 'git config --global user.name' 2>/dev/null || true)"
@@ -585,6 +600,12 @@ EOF
         if [ -z "$CURRENT_GIT_EMAIL" ]; then
             run_user "git config --global user.email 'leftger@gmail.com'"
         fi
+
+        # Install productivity aliases
+        run_user "git config --global alias.caa 'commit --amend --all'"
+        run_user "git config --global alias.caane 'commit --amend --all --no-edit'"
+        run_user "git config --global alias.cob 'checkout -b'"
+        run_user "git config --global alias.apply-gitignore '!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f'"
 
         # Install pull-all alias
         PULL_ALL_CMD='!f() { \

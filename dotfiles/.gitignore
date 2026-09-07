@@ -1,0 +1,23 @@
+# System & OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Editor & Swap files
+*.swp
+*.swo
+*~
+*.bak
+.idea/
+.vscode/
+*.sublime-workspace
+
+# Build artifacts & logs
+*.log
+*.tmp
+*.bak
+
+# Environment & Secret files
+.env.local
+.env.*.local
+.envrc
