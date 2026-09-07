@@ -720,7 +720,6 @@ if [ "$SKIP_RUST" -eq 0 ]; then
 
     CARGO_HOME="${TARGET_HOME}/.cargo"
     RUSTUP_BIN="${CARGO_HOME}/bin/rustup"
-    CARGO_BIN="${CARGO_HOME}/bin/cargo"
 
     if [ ! -x "$RUSTUP_BIN" ]; then
         log_info "Installing rustup with stable toolchain..."

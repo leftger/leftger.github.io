@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # ==============================================================================
 # Shell Productivity Aliases & Helpers (usable by both bash and zsh)
 # ==============================================================================
@@ -10,7 +11,7 @@ alias .....='cd ../../../..'
 
 # Create directory and immediately cd into it
 mcd() {
-    mkdir -p "$1" && cd "$1"
+    mkdir -p "$1" && cd "$1" || return
 }
 
 # Quick jump to project repositories (checks my-repos, Projects, and repos)
@@ -18,20 +19,20 @@ cdr() {
     local target="${1:-}"
     if [ -z "$target" ]; then
         if [ -d "${HOME}/Projects/my-repos" ]; then
-            cd "${HOME}/Projects/my-repos"
+            cd "${HOME}/Projects/my-repos" || return
         elif [ -d "${HOME}/Projects" ]; then
-            cd "${HOME}/Projects"
+            cd "${HOME}/Projects" || return
         elif [ -d "${HOME}/repos" ]; then
-            cd "${HOME}/repos"
+            cd "${HOME}/repos" || return
         fi
         return
     fi
     if [ -d "${HOME}/Projects/my-repos/${target}" ]; then
-        cd "${HOME}/Projects/my-repos/${target}"
+        cd "${HOME}/Projects/my-repos/${target}" || return
     elif [ -d "${HOME}/Projects/${target}" ]; then
-        cd "${HOME}/Projects/${target}"
+        cd "${HOME}/Projects/${target}" || return
     elif [ -d "${HOME}/repos/${target}" ]; then
-        cd "${HOME}/repos/${target}"
+        cd "${HOME}/repos/${target}" || return
     else
         echo "Repository directory '${target}' not found in ~/Projects or ~/repos." >&2
         return 1
@@ -44,9 +45,14 @@ refreshenv() {
 }
 
 # Unified system and package upgrade
-if [ -x "${HOME}/.local/bin/full-upgrade" ]; then
-    alias up="${HOME}/.local/bin/full-upgrade"
-fi
+up() {
+    if [ -x "${HOME}/.local/bin/full-upgrade" ]; then
+        "${HOME}/.local/bin/full-upgrade" "$@"
+    else
+        echo "full-upgrade script not found at ~/.local/bin/full-upgrade" >&2
+        return 1
+    fi
+}
 
 # Directory Listings
 alias l='ls -CF'
@@ -75,8 +81,17 @@ fi
 alias mk='make -j$(nproc 2>/dev/null || echo 4)'
 alias py-env='python3 -m venv env && source env/bin/activate'
 
-# Git shortcuts
-alias gh='xdg-open "$(git remote -v 2>/dev/null | grep fetch | head -1 | awk '\''{print $2}'\'' | sed -e '\''s/:/\//'\'' -e '\''s/git@/https:\/\//'\'')"'
+# Git shortcuts & remote browser opener
+gh() {
+    local remote_url
+    remote_url="$(git remote -v 2>/dev/null | grep fetch | head -1 | awk '{print $2}' | sed -e 's/:/\//' -e 's/git@/https:\/\//')"
+    if [ -n "$remote_url" ]; then
+        xdg-open "$remote_url"
+    else
+        echo "No git remote repository found." >&2
+        return 1
+    fi
+}
 
 # WSL / Windows interop (if running inside WSL)
 if [ -d "/mnt/c" ] || grep -qi microsoft /proc/version 2>/dev/null; then
