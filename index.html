@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerzain Mata | Workstation Bootstrapper</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --accent: #e05d44;
+      --accent-glow: rgba(224, 93, 68, 0.2);
+      --text: #c9d1d9;
+      --text-bright: #f0f6fc;
+      --text-muted: #8b949e;
+      --code-bg: #0d1117;
+      --success: #3fb950;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      padding: 2.5rem 1rem;
+      display: flex;
+      justify-content: center;
+    }
+    .container {
+      max-width: 780px;
+      width: 100%;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+    }
+    header img {
+      width: 80px;
+      height: 80px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+    h1 {
+      color: var(--text-bright);
+      font-size: 1.8rem;
+      font-weight: 700;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-top: 0.25rem;
+    }
+    .subtitle a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .subtitle a:hover {
+      text-decoration: underline;
+    }
+    .hero-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .hero-card h2 {
+      color: var(--text-bright);
+      font-size: 1.2rem;
+      margin-bottom: 0.75rem;
+    }
+    .command-box {
+      display: flex;
+      align-items: center;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.95rem;
+      color: #79c0ff;
+      overflow-x: auto;
+      position: relative;
+      margin: 1rem 0;
+    }
+    .command-text {
+      flex: 1;
+      white-space: nowrap;
+      user-select: all;
+    }
+    .copy-btn {
+      background: #21262d;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      margin-left: 0.75rem;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover {
+      background: #30363d;
+      color: var(--text-bright);
+    }
+    .copy-btn.copied {
+      background: var(--success);
+      color: #fff;
+      border-color: var(--success);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.2rem;
+    }
+    .card h3 {
+      color: var(--text-bright);
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .card ul {
+      list-style-type: none;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+    }
+    .card li {
+      margin-bottom: 0.35rem;
+    }
+    .card li strong {
+      color: var(--text);
+    }
+    footer {
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+    }
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="https://raw.githubusercontent.com/leftger/embedded-gui/master/assets/aztec_rustacean.png" alt="Aztec Ferris">
+      <div>
+        <h1>Gerzain's Workstation Bootstrapper</h1>
+        <p class="subtitle">Embedded Systems Engineer & Embassy Maintainer &bull; <a href="https://github.com/leftger" target="_blank" rel="noopener">@leftger</a></p>
+      </div>
+    </header>
+
+    <div class="hero-card">
+      <h2>🚀 Install & Bootstrap</h2>
+      <p style="color: var(--text-muted); font-size: 0.95rem;">Automated, idempotent Linux workstation provisioning tailored for bare-metal C & async Rust development.</p>
+
+      <div class="command-box">
+        <span class="command-text" id="cmd">curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh</span>
+        <button class="copy-btn" onclick="copyCommand()">Copy</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>🦀 Rust & Embedded</h3>
+        <ul>
+          <li><strong>Rustup:</strong> Stable toolchain + rust-src, clippy, rustfmt</li>
+          <li><strong>Targets:</strong> Cortex-M (M0+, M3, M4F, M33/WBA), RISC-V</li>
+          <li><strong>Tools:</strong> probe-rs, cargo-binstall, cargo-deny, cargo-llvm-cov</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>🔌 Hardware & Toolchains</h3>
+        <ul>
+          <li><strong>GNU ARM:</strong> gcc-arm-none-eabi, gdb-multiarch, newlib</li>
+          <li><strong>Hardware:</strong> probe-rs udev rules for CMSIS-DAP/ST-Link</li>
+          <li><strong>Permissions:</strong> dialout & plugdev non-root UART access</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>⚡ Terminal & Shell</h3>
+        <ul>
+          <li><strong>Zsh:</strong> Oh-My-Zsh configured as default shell</li>
+          <li><strong>Plugins:</strong> sudo, cargo, rust, z, extract, autosuggestions</li>
+          <li><strong>Modern CLI:</strong> btop, mosh, tmux, ripgrep, fd, bat, fzf</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>🎨 Curated Dotfiles</h3>
+        <ul>
+          <li><strong>Vim:</strong> Badwolf theme, line numbers, whitespace stripping</li>
+          <li><strong>Aliases:</strong> Cross-shell .., ..., mk='make -j$(nproc)', gh</li>
+          <li><strong>Git:</strong> core.editor=vim, main branch, alias.pull-all</li>
+        </ul>
+      </div>
+    </div>
+
+    <footer>
+      <p>Source code and documentation available on <a href="https://github.com/leftger/leftger.github.io" target="_blank" rel="noopener">GitHub</a>.</p>
+    </footer>
+  </div>
+
+  <script>
+    function copyCommand() {
+      const text = document.getElementById('cmd').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.innerText = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.innerText = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>
