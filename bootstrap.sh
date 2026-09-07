@@ -396,7 +396,6 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         jq
         tree
         vim
-        btop
         mosh
         tmux
     )
@@ -431,7 +430,6 @@ else
         jq
         tree
         vim
-        btop
         mosh
         binutils
         tmux
@@ -453,7 +451,7 @@ if [ "$SKIP_TOOLS" -eq 0 ]; then
             fd
             bat
             fzf
-            htop
+            btop
         )
         if [ "$DRY_RUN" -eq 1 ]; then
             log_info "[DRY-RUN] brew install ${BREW_CLI_PACKAGES[*]}"
@@ -466,7 +464,7 @@ if [ "$SKIP_TOOLS" -eq 0 ]; then
             fd-find
             bat
             fzf
-            htop
+            btop
         )
         run_sudo apt-get install "${APT_FLAGS[@]}" "${CLI_PACKAGES[@]}"
 
@@ -499,8 +497,7 @@ if [ "$SKIP_EMBEDDED" -eq 0 ]; then
             openocd
             libusb
             hidapi
-            picocom
-            minicom
+            tio
         )
         if [ "$DRY_RUN" -eq 1 ]; then
             log_info "[DRY-RUN] brew install ${BREW_EMBEDDED_PACKAGES[*]}"
@@ -521,8 +518,7 @@ if [ "$SKIP_EMBEDDED" -eq 0 ]; then
             gdb-multiarch
             libudev-dev
             libusb-1.0-0-dev
-            picocom
-            minicom
+            tio
         )
         run_sudo apt-get install "${APT_FLAGS[@]}" "${EMBEDDED_PACKAGES[@]}"
 
@@ -932,7 +928,7 @@ Summary of changes:
   • Timezone: ${TIMEZONE}
   • Core Dev: cmake, ninja, clang/llvm, git, jq, tmux, tree, etc.
   • Modern CLI: vim, btop, mosh, tmux, ripgrep, fd, bat, fzf
-  • Embedded Tools: gcc-arm-none-eabi, gdb, newlib, openocd, probe-rs
+  • Embedded Tools: gcc-arm-none-eabi, gdb, newlib, openocd, tio, probe-rs
   • Shell: Zsh + Oh-My-Zsh with syntax-highlighting, autosuggestions, my-completions
   • Dotfiles & Git: .vimrc (badwolf), .tmux.conf, .bash_aliases, git editor=vim, alias.pa, .gitmessage
   • Maintenance: ~/.local/bin/full-upgrade (alias: up) with omz & brew update
