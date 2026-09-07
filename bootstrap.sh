@@ -475,6 +475,15 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
             if ! grep -q 'DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
                 echo 'DISABLE_MAGIC_FUNCTIONS="true"' >> "$ZSHRC"
             fi
+            if ! grep -q 'fzf --zsh' "$ZSHRC"; then
+                cat << 'EOF' >> "$ZSHRC"
+
+# Interactive fzf keybindings (Ctrl+R, Ctrl+T, Alt+C) and fuzzy completion
+if command -v fzf >/dev/null 2>&1; then
+    eval "$(fzf --zsh 2>/dev/null || true)"
+fi
+EOF
+            fi
         fi
     fi
 
@@ -578,15 +587,33 @@ EOF
         fetch_asset "dotfiles/.gitignore" "$GITIGNORE_DEST"
     fi
 
-    # Configure Git Defaults, Core Settings, and Aliases
-    log_info "Configuring Git defaults, push settings, and aliases..."
+    # Deploy git commit template
+    GITMESSAGE_DEST="${TARGET_HOME}/.gitmessage"
     if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Set git core, push.autoSetupRemote, rebase/merge autoStash, and aliases"
+        log_info "[DRY-RUN] Deploy .gitmessage to ${GITMESSAGE_DEST}"
+    else
+        fetch_asset "dotfiles/.gitmessage" "$GITMESSAGE_DEST"
+    fi
+
+    # Deploy .tmux.conf
+    TMUX_DEST="${TARGET_HOME}/.tmux.conf"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Deploy .tmux.conf to ${TMUX_DEST}"
+    else
+        fetch_asset "dotfiles/.tmux.conf" "$TMUX_DEST"
+    fi
+
+    # Configure Git Defaults, Core Settings, and Aliases
+    log_info "Configuring Git defaults, push settings, commit template, and aliases..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Set git core, push.autoSetupRemote, rebase/merge autoStash, commit template, and aliases"
     else
         run_user "git config --global core.editor vim"
         run_user "git config --global init.defaultBranch main"
         run_user "git config --global core.hooksPath .githooks"
         run_user "git config --global core.excludesfile ~/.gitignore"
+        run_user "git config --global commit.template ~/.gitmessage"
+        run_user "git config --global commit.cleanup strip"
         run_user "git config --global push.autoSetupRemote true"
         run_user "git config --global rebase.autoStash true"
         run_user "git config --global merge.autoStash true"
@@ -608,35 +635,7 @@ EOF
         run_user "git config --global alias.apply-gitignore '!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f'"
 
         # Install pull-all alias
-        PULL_ALL_CMD='!f() { \
-    dir="."; \
-    if [ -n "$1" ] && [ "${1#-}" = "$1" ]; then \
-        if [ ! -d "$1" ]; then \
-            echo "Error: Directory '\''$1'\'' does not exist." >&2; \
-            return 1 2>/dev/null || exit 1; \
-        fi; \
-        dir="$1"; \
-        shift; \
-    fi; \
-    found=0; \
-    for d in "$dir"/*/; do \
-        [ -e "$d" ] || continue; \
-        if [ -d "$d/.git" ] || [ -f "$d/.git" ]; then \
-            found=$((found + 1)); \
-            repo=$(basename "$d"); \
-            branch=$(git -C "$d" branch --show-current 2>/dev/null); \
-            if [ -n "$branch" ]; then \
-                echo "==> Pulling $repo ($branch)..."; \
-                git -C "$d" pull origin "$branch" "$@" || echo "    [!] Failed to pull $repo"; \
-            else \
-                echo "==> $repo: Skipping (HEAD is detached)"; \
-            fi; \
-        fi; \
-    done; \
-    if [ "$found" -eq 0 ]; then \
-        echo "No git repositories found in '\''$dir'\''."; \
-    fi; \
-}; f'
+        PULL_ALL_CMD='!f() { [ -d "$1" ] && { d="$1"; shift; } || d="."; for r in "$d"/*/; do [ -e "$r/.git" ] || continue; b=$(git -C "$r" branch --show-current 2>/dev/null); [ -n "$b" ] || continue; echo "==> $(basename "$r") ($b)..."; git -C "$r" config remote.upstream.url >/dev/null 2>&1 && git -C "$r" pull upstream "$b" "$@"; git -C "$r" pull origin "$b" "$@"; done; }; f'
         run_user "git config --global alias.pull-all '$PULL_ALL_CMD'"
     fi
 

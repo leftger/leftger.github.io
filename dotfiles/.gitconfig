@@ -13,9 +13,12 @@
 	autoStash = true
 [merge]
 	autoStash = true
+[commit]
+	template = ~/.gitmessage
+	cleanup = strip
 [alias]
 	caa = commit --amend --all
 	caane = commit --amend --all --no-edit
 	cob = checkout -b
 	apply-gitignore = "!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f"
-	pull-all = "!f() { \\\n    dir=\".\"; \\\n    if [ -n \"$1\" ] && [ \"${1#-}\" = \"$1\" ]; then \\\n        if [ ! -d \"$1\" ]; then \\\n            echo \"Error: Directory '$1' does not exist.\" >&2; \\\n            return 1 2>/dev/null || exit 1; \\\n        fi; \\\n        dir=\"$1\"; \\\n        shift; \\\n    fi; \\\n    found=0; \\\n    for d in \"$dir\"/*/; do \\\n        [ -e \"$d\" ] || continue; \\\n        if [ -d \"$d/.git\" ] || [ -f \"$d/.git\" ]; then \\\n            found=$((found + 1)); \\\n            repo=$(basename \"$d\"); \\\n            branch=$(git -C \"$d\" branch --show-current 2>/dev/null); \\\n            if [ -n \"$branch\" ]; then \\\n                echo \"==> Pulling $repo ($branch)...\"; \\\n                git -C \"$d\" pull origin \"$branch\" \"$@\" || echo \"    [!] Failed to pull $repo\"; \\\n            else \\\n                echo \"==> $repo: Skipping (HEAD is detached)\"; \\\n            fi; \\\n        fi; \\\n    done; \\\n    if [ \"$found\" -eq 0 ]; then \\\n        echo \"No git repositories found in '$dir'.\"; \\\n    fi; \\\n}; f"
+	pull-all = "!f() { [ -d \"$1\" ] && { d=\"$1\"; shift; } || d=\".\"; for r in \"$d\"/*/; do [ -e \"$r/.git\" ] || continue; b=$(git -C \"$r\" branch --show-current 2>/dev/null); [ -n \"$b\" ] || continue; echo \"==> $(basename \"$r\") ($b)...\"; git -C \"$r\" config remote.upstream.url >/dev/null 2>&1 && git -C \"$r\" pull upstream \"$b\" \"$@\"; git -C \"$r\" pull origin \"$b\" \"$@\"; done; }; f"

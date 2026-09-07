@@ -31,10 +31,21 @@ alias lac='ls -lah --color=none'
 alias ll='ls -alF'
 alias ls='ls --color=auto'
 
-# Search with color
+# Search with color & smart case
 alias grep='grep --color=auto'
 alias egrep='egrep --color=auto'
 alias fgrep='fgrep --color=auto'
+if command -v rg >/dev/null 2>&1; then
+    alias rg='rg --smart-case'
+fi
+
+# Modern CLI fallbacks (Debian/Ubuntu batcat/fdfind naming)
+if ! command -v bat >/dev/null 2>&1 && command -v batcat >/dev/null 2>&1; then
+    alias bat='batcat'
+fi
+if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
+    alias fd='fdfind'
+fi
 
 # Development & Build
 alias mk='make -j$(nproc 2>/dev/null || echo 4)'
