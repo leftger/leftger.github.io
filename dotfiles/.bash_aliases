@@ -5,7 +5,8 @@
 
 # Attach GPG pinentry to the active terminal for commit signing
 if [ -t 0 ]; then
-    export GPG_TTY=$(tty 2>/dev/null || echo "")
+    GPG_TTY="$(tty 2>/dev/null || echo "")"
+    export GPG_TTY
 fi
 
 # Directory Navigation & Utilities

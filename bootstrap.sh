@@ -149,8 +149,10 @@ sed_i() {
 }
 
 detect_system_arch() {
-    local arch="$(uname -m)"
-    local os="${OS_TYPE:-$(uname -s)}"
+    local arch
+    arch="$(uname -m)"
+    local os
+    os="${OS_TYPE:-$(uname -s)}"
 
     if [ "$os" = "Darwin" ]; then
         # Check sysctl directly to avoid Rosetta 2 translation reporting x86_64 on Apple Silicon
@@ -198,7 +200,8 @@ downloader() {
 
 detect_system_timezone() {
     local detected_tz=""
-    local os_name="${OS_TYPE:-$(uname -s)}"
+    local os_name
+    os_name="${OS_TYPE:-$(uname -s)}"
 
     if [ "$os_name" = "Darwin" ]; then
         if [ -L /etc/localtime ]; then
@@ -556,9 +559,8 @@ if [ "$OS_TYPE" = "Darwin" ]; then
             log_info "[DRY-RUN] Install Xcode Command Line Tools via softwareupdate or xcode-select"
         else
             # Attempt headless installation first using softwareupdate trigger file
-            local clt_placeholder="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
+            clt_placeholder="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
             run_sudo touch "${clt_placeholder}"
-            local clt_label
             clt_label="$(/usr/sbin/softwareupdate -l 2>/dev/null | grep -B 1 -E 'Command Line Tools' | awk -F'*' '/^ *\*/ {print $2}' | sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n1)"
             if [ -n "${clt_label}" ]; then
                 log_info "Installing ${clt_label} headlessly via softwareupdate..."
