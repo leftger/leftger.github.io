@@ -32,7 +32,7 @@
       justify-content: center;
     }
     .container {
-      max-width: 780px;
+      max-width: 820px;
       width: 100%;
     }
     header {
@@ -87,7 +87,7 @@
       border-radius: 8px;
       padding: 0.85rem 1rem;
       font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-      font-size: 0.95rem;
+      font-size: 0.92rem;
       color: #79c0ff;
       overflow-x: auto;
       position: relative;
@@ -120,7 +120,7 @@
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
       gap: 1rem;
       margin-bottom: 2rem;
     }
@@ -171,13 +171,13 @@
       <img src="https://raw.githubusercontent.com/leftger/embedded-gui/master/assets/aztec_rustacean.png" alt="Aztec Ferris">
       <div>
         <h1>Gerzain's Workstation Bootstrapper</h1>
-        <p class="subtitle">Embedded Systems Engineer & Embassy Maintainer &bull; <a href="https://github.com/leftger" target="_blank" rel="noopener">@leftger</a></p>
+        <p class="subtitle">Embedded Systems Engineer & Embassy Contributor &bull; <a href="https://github.com/leftger" target="_blank" rel="noopener">@leftger</a></p>
       </div>
     </header>
 
     <div class="hero-card">
       <h2>🚀 Install & Bootstrap</h2>
-      <p style="color: var(--text-muted); font-size: 0.95rem;">Automated, idempotent Linux workstation provisioning tailored for bare-metal C & async Rust development.</p>
+      <p style="color: var(--text-muted); font-size: 0.95rem;">Automated, idempotent workstation provisioning for bare-metal C & async Rust development across Linux (Debian/Ubuntu), macOS, and WSL.</p>
 
       <div class="command-box">
         <span class="command-text" id="cmd">curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh</span>
@@ -189,27 +189,30 @@
       <div class="card">
         <h3>🦀 Rust & Embedded</h3>
         <ul>
-          <li><strong>Rustup:</strong> Stable toolchain + rust-src, clippy, rustfmt</li>
-          <li><strong>Targets:</strong> Cortex-M (M0+, M3, M4F, M33), RISC-V</li>
-          <li><strong>Tools:</strong> probe-rs, cargo-binstall, cargo-deny, cargo-llvm-cov</li>
+          <li><strong>Rustup:</strong> Stable toolchain + rust-src, llvm-tools, clippy, rustfmt, rust-analyzer</li>
+          <li><strong>Targets:</strong> Cortex-M (M0+, M3, M4F, M33), RISC-V, Wasm</li>
+          <li><strong>Flashing & Debug:</strong> probe-rs, espflash / cargo-espflash</li>
+          <li><strong>Ecosystem:</strong> cargo-binstall, cargo-binutils (size, objcopy, objdump), cargo-deny, cargo-llvm-cov, cargo-generate</li>
         </ul>
       </div>
 
       <div class="card">
         <h3>🔌 Hardware & Toolchains</h3>
         <ul>
-          <li><strong>GNU ARM:</strong> gcc-arm-none-eabi, gdb, newlib, openocd</li>
-          <li><strong>Serial & Debug:</strong> tio serial I/O, probe-rs hardware rules</li>
-          <li><strong>Cross-Platform:</strong> Native support for Linux & macOS (Homebrew)</li>
+          <li><strong>GNU Toolchain:</strong> gcc-arm-none-eabi, gdb-multiarch, newlib, openocd</li>
+          <li><strong>Serial & Debug:</strong> tio serial monitor, probe-rs udev rules (CMSIS-DAP, ST-Link, J-Link)</li>
+          <li><strong>macOS Polish:</strong> Headless Xcode CLI tools installer, Touch ID for sudo (/etc/pam.d/sudo_local)</li>
+          <li><strong>WSL USB:</strong> Passthrough helpers for usbipd-win (usb-list, usb-attach, usb-detach)</li>
         </ul>
       </div>
 
       <div class="card">
         <h3>⚡ Terminal & Shell</h3>
         <ul>
-          <li><strong>Zsh:</strong> Oh-My-Zsh with autosuggestions & syntax highlighting</li>
-          <li><strong>Plugins:</strong> sudo, cargo, rust, z, extract, my-completions</li>
-          <li><strong>Modern CLI:</strong> btop, mosh, tmux, ripgrep, fd, bat, fzf</li>
+          <li><strong>Zsh + Oh-My-Zsh:</strong> Default shell with autosuggestions, syntax highlighting, and zsh-completions</li>
+          <li><strong>Plugins:</strong> git, sudo, rust, extract, z, colored-man-pages, command-not-found</li>
+          <li><strong>Modern CLI:</strong> btop, mosh, tmux, ripgrep, fd, bat, fzf (fzf --zsh keybindings)</li>
+          <li><strong>GPG Terminal:</strong> GPG_TTY pinentry attachment for commit signing</li>
         </ul>
       </div>
 
@@ -217,16 +220,17 @@
         <h3>💻 Modern Editors</h3>
         <ul>
           <li><strong>Zed:</strong> High-performance code editor (~/.local/bin/zed)</li>
-          <li><strong>Vim:</strong> Badwolf theme, line numbers, whitespace stripping</li>
-          <li><strong>Tmux:</strong> TrueColor, vi mode keys, 10k scrollback</li>
+          <li><strong>Vim:</strong> Curated Badwolf, Molokai & Monokai themes, whitespace cleanup, 4-space indent</li>
+          <li><strong>Tmux:</strong> TrueColor, vi-mode keys, 10k scrollback, GitHub Dark status bar</li>
         </ul>
       </div>
 
       <div class="card">
         <h3>🔐 Security & Dotfiles</h3>
         <ul>
-          <li><strong>Keys:</strong> ED25519 SSH & GPG commit signing auto-setup</li>
-          <li><strong>Git:</strong> Conventional commit template (~/.gitmessage), alias.pa</li>
+          <li><strong>Keys:</strong> Automated ED25519 SSH & GPG commit signing key generation</li>
+          <li><strong>Git Defaults:</strong> ~/.gitmessage template, global hooks dispatcher (~/.githooks), push.autoSetupRemote, autoStash, alias.pa</li>
+          <li><strong>Credentials:</strong> Native macOS osxkeychain and Windows Git Credential Manager for WSL</li>
           <li><strong>Standards:</strong> .editorconfig, .hushlogin (silent login MOTD)</li>
         </ul>
       </div>
@@ -234,9 +238,9 @@
       <div class="card">
         <h3>🛠️ Maintenance & Productivity</h3>
         <ul>
-          <li><strong>full-upgrade:</strong> One-stop updater for APT, Rust, Zed, WSL (alias: up)</li>
-          <li><strong>Aliases:</strong> mcd, enhanced cdr (with TAB completion), refreshenv</li>
-          <li><strong>WSL Interop:</strong> cdw, wslview BROWSER, systemd boot config</li>
+          <li><strong>full-upgrade (up):</strong> One-stop updater for APT, Homebrew, Rust, Zed, Flatpak, Snap, pipx, npm, and WSL</li>
+          <li><strong>Aliases:</strong> mcd, cdr (with dynamic TAB completion), refreshenv, gh browser opener</li>
+          <li><strong>Localization:</strong> Automatic host timezone detection + system-wide en_US.UTF-8</li>
         </ul>
       </div>
     </div>

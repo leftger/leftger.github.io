@@ -10,7 +10,7 @@
 #
 # Summary of automated actions:
 #   1. Locale configuration: en_US.UTF-8 generated and set system-wide
-#   2. Timezone configuration: defaults to America/Phoenix (configurable)
+#   2. Timezone configuration: autodetects system timezone (configurable via --timezone)
 #   3. Package manager: APT (Debian/Ubuntu) or Homebrew (macOS) upgrades
 #   4. Core development tools: git, cmake, ninja, clang/llvm, pkg-config, etc.
 #   5. Modern CLI utilities: vim, btop, mosh, tmux, ripgrep, fd, bat, fzf
@@ -21,7 +21,7 @@
 #      ~/.githooks dispatcher (forwards to ./.githooks), ~/.git_template,
 #      unified full-upgrade script (alias: up), and shell aliases
 #  10. Rust toolchain: rustup (stable), Cortex-M/RISC-V/Wasm targets,
-#      probe-rs tools, cargo-binstall, cargo-deny, cargo-llvm-cov
+#      probe-rs tools, cargo-binstall, cargo-binutils, espflash, cargo-deny, cargo-llvm-cov
 #  11. Zed Editor: high-performance code editor
 # ==============================================================================
 
@@ -41,12 +41,16 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 set -euo pipefail
+umask 0022
 
 # ------------------------------------------------------------------------------
 # Default Configuration & Flags
 # ------------------------------------------------------------------------------
-DEFAULT_TIMEZONE="America/Phoenix"
-TIMEZONE="${TIMEZONE:-$DEFAULT_TIMEZONE}"
+TIMEZONE="${TIMEZONE:-}"
+TIMEZONE_EXPLICIT=0
+if [ -n "$TIMEZONE" ]; then
+    TIMEZONE_EXPLICIT=1
+fi
 SKIP_UPGRADE=0
 SKIP_EMBEDDED=0
 SKIP_RUST=0
@@ -57,15 +61,26 @@ SKIP_ZED=0
 SKIP_KEYS=0
 DRY_RUN=0
 
-# Color formatting
-BOLD='\033[1m'
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-RESET='\033[0m'
+# Color formatting (disabled when stdout is redirected to maintain clean logs)
+if [ -t 1 ]; then
+    BOLD='\033[1m'
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    MAGENTA='\033[0;35m'
+    CYAN='\033[0;36m'
+    RESET='\033[0m'
+else
+    BOLD=''
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    MAGENTA=''
+    CYAN=''
+    RESET=''
+fi
 
 # Asset distribution URLs
 PAGES_BASE="https://leftger.github.io"
@@ -74,6 +89,147 @@ RAW_REPO_BASE="https://raw.githubusercontent.com/leftger/leftger.github.io/main"
 # ------------------------------------------------------------------------------
 # Helper Functions & Logging
 # ------------------------------------------------------------------------------
+# Portable which using bash type -P
+which() {
+    type -P "$@"
+}
+
+need_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        log_error "Required command '$1' is missing. Please install it to continue."
+        exit 1
+    fi
+}
+
+retry() {
+    local tries="$1" n="$1" pause=2
+    shift
+    if ! "$@"; then
+        while [ $((--n)) -gt 0 ]; do
+            log_warn "Command failed. Retrying in ${pause}s: $*"
+            sleep "${pause}"
+            pause=$((pause * 2))
+            if "$@"; then return 0; fi
+        done
+        log_error "Failed ${tries} times executing: $*"
+        return 1
+    fi
+}
+
+verify_sha256() {
+    local file="$1"
+    local expected="$2"
+    local computed=""
+
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        computed="$(sha256sum -b "$file" 2>/dev/null | cut -c1-64)"
+    elif command -v shasum >/dev/null 2>&1; then
+        computed="$(shasum -a 256 -b "$file" 2>/dev/null | cut -c1-64)"
+    elif command -v openssl >/dev/null 2>&1; then
+        computed="$(openssl dgst -r -sha256 "$file" 2>/dev/null | cut -c1-64)"
+    else
+        log_warn "Cannot verify SHA-256 (no sha256sum, shasum, or openssl available)."
+        return 0
+    fi
+
+    [ "$computed" = "$expected" ]
+}
+
+# Portable in-place sed (handles BSD sed on macOS and GNU sed on Linux)
+sed_i() {
+    if [ "${OS_TYPE:-$(uname -s)}" = "Darwin" ]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
+detect_system_arch() {
+    local arch="$(uname -m)"
+    local os="${OS_TYPE:-$(uname -s)}"
+
+    if [ "$os" = "Darwin" ]; then
+        # Check sysctl directly to avoid Rosetta 2 translation reporting x86_64 on Apple Silicon
+        if (sysctl hw.optional.arm64 2>/dev/null || true) | grep -q ': 1'; then
+            arch="arm64"
+        elif (sysctl hw.optional.x86_64 2>/dev/null || true) | grep -q ': 1'; then
+            arch="x86_64"
+        fi
+    fi
+
+    echo "$arch"
+}
+
+downloader() {
+    local url="$1"
+    local dest="$2"
+    local dld="curl"
+
+    if command -v curl >/dev/null 2>&1; then
+        local curl_bin
+        curl_bin="$(command -v curl)"
+        # Check for snap-confined curl
+        if echo "$curl_bin" | grep -q "/snap/"; then
+            if command -v wget >/dev/null 2>&1; then
+                dld="wget"
+            else
+                log_warn "curl is installed via Snap and may have filesystem sandbox restrictions."
+            fi
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        dld="wget"
+    else
+        log_error "Neither curl nor wget was found."
+        return 1
+    fi
+
+    if [ "$dld" = "curl" ]; then
+        curl --retry 3 --retry-connrefused -C - --proto '=https' --tlsv1.2 -fsSL "$url" -o "$dest" 2>/dev/null || \
+        curl --retry 3 -fsSL "$url" -o "$dest" 2>/dev/null || \
+        curl -fsSL "$url" -o "$dest"
+    else
+        wget --tries=3 -c -qO "$dest" "$url"
+    fi
+}
+
+detect_system_timezone() {
+    local detected_tz=""
+    local os_name="${OS_TYPE:-$(uname -s)}"
+
+    if [ "$os_name" = "Darwin" ]; then
+        if [ -L /etc/localtime ]; then
+            detected_tz="$(readlink /etc/localtime 2>/dev/null | sed -E 's/.*zoneinfo\///')"
+        fi
+        if [ -z "$detected_tz" ] && command -v systemsetup >/dev/null 2>&1; then
+            detected_tz="$(systemsetup -gettimezone 2>/dev/null | sed -n 's/^Time Zone: //p')"
+        fi
+        if [ -z "$detected_tz" ] && command -v defaults >/dev/null 2>&1; then
+            detected_tz="$(defaults read /Library/Preferences/.GlobalPreferences.plist com.apple.TimeZone 2>/dev/null || true)"
+        fi
+    else
+        if command -v timedatectl >/dev/null 2>&1; then
+            detected_tz="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
+        fi
+        if [ -z "$detected_tz" ] && [ -L /etc/localtime ]; then
+            detected_tz="$(readlink -f /etc/localtime 2>/dev/null | sed -E 's/.*zoneinfo\///')"
+        fi
+        if [ -z "$detected_tz" ] && [ -f /etc/timezone ]; then
+            detected_tz="$(head -n 1 /etc/timezone 2>/dev/null | tr -d '[:space:]')"
+        fi
+    fi
+
+    # Fallback to UTC if undetectable or malformed
+    if [ -z "$detected_tz" ] || [ "$detected_tz" = "localtime" ]; then
+        detected_tz="UTC"
+    fi
+
+    echo "$detected_tz"
+}
+
 log_info() {
     printf "${BLUE}[INFO]${RESET} %s\n" "$*"
 }
@@ -103,7 +259,7 @@ Usage:
   curl -fsSL https://raw.githubusercontent.com/leftger/leftger.github.io/main/bootstrap.sh | bash -s -- [OPTIONS]
 
 Options:
-  -t, --timezone <TZ>   Set system timezone (default: ${DEFAULT_TIMEZONE})
+  -t, --timezone <TZ>   Set system timezone (default: autodetect system timezone)
       --skip-upgrade    Skip system / package manager upgrades
       --skip-embedded   Skip ARM Cortex-M toolchain and probe-rs setup
       --skip-rust       Skip Rust toolchain and cargo utilities installation
@@ -116,7 +272,7 @@ Options:
   -h, --help            Show this help message and exit
 
 Environment Variables:
-  TIMEZONE              Overrides the default timezone if --timezone is omitted
+  TIMEZONE              Overrides auto-detected timezone if --timezone is omitted
 EOF
 }
 
@@ -125,6 +281,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -t | --timezone)
             TIMEZONE="$2"
+            TIMEZONE_EXPLICIT=1
             shift 2
             ;;
         --skip-upgrade)
@@ -182,12 +339,29 @@ if [ "$DRY_RUN" -eq 1 ]; then
     log_info "Running in DRY RUN mode. No modifications will be made."
 fi
 
+# Verify essential system commands upfront
+need_cmd uname
+need_cmd mktemp
+need_cmd chmod
+need_cmd mkdir
+need_cmd rm
+need_cmd sed
+need_cmd grep
+need_cmd cat
+
 # Ensure running on supported operating system (Linux or macOS)
 OS_TYPE="$(uname -s)"
 if [ "$OS_TYPE" != "Linux" ] && [ "$OS_TYPE" != "Darwin" ]; then
     log_error "Unsupported operating system: ${OS_TYPE}. This script supports Linux (Ubuntu/Debian) and macOS."
     exit 1
 fi
+
+ARCH_TYPE="$(detect_system_arch)"
+
+IS_WSL=0
+if [ -f /proc/version ] && grep -qi "microsoft" /proc/version 2>/dev/null; then
+    IS_WSL=1
+fi 
 
 TARGET_USER="${SUDO_USER:-$USER}"
 if command -v getent >/dev/null 2>&1; then
@@ -202,6 +376,11 @@ if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
     TARGET_HOME="$HOME"
 fi
 
+# Autodetect timezone if not explicitly provided
+if [ -z "$TIMEZONE" ]; then
+    TIMEZONE="$(detect_system_timezone)"
+fi
+
 # Determine script location if running from a local checkout
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
@@ -214,13 +393,20 @@ run_cmd() {
 }
 
 run_sudo() {
+    local -a sudo_cmd=()
+    if [ -n "${SUDO_ASKPASS-}" ]; then
+        sudo_cmd=(sudo -A)
+    else
+        sudo_cmd=(sudo)
+    fi
+
     if [ "$DRY_RUN" -eq 1 ]; then
         printf "${MAGENTA}[DRY-RUN-SUDO]${RESET} %s\n" "$*"
     else
         if [ "$(id -u)" -eq 0 ]; then
             "$@"
         else
-            sudo "$@"
+            "${sudo_cmd[@]}" "$@"
         fi
     fi
 }
@@ -237,21 +423,28 @@ run_user() {
     fi
 }
 
-# Setup sudo credentials & keep-alive (only in live mode)
+# Setup isolated temporary workspace and sudo keep-alive
+BOOTSTRAP_TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'bootstrap_tmp')"
 SUDO_PID=""
+
 cleanup() {
     if [ -n "$SUDO_PID" ]; then
         kill "$SUDO_PID" 2>/dev/null || true
     fi
+    if [ -n "$BOOTSTRAP_TMP_DIR" ] && [ -d "$BOOTSTRAP_TMP_DIR" ]; then
+        rm -rf "$BOOTSTRAP_TMP_DIR" 2>/dev/null || true
+    fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT QUIT TERM
 
 if [ "$DRY_RUN" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
     if sudo -n true 2>/dev/null; then
         log_info "Sudo privileges active."
     else
         log_info "Prompting for sudo privileges..."
-        if [ -t 0 ]; then
+        if [ -n "${SUDO_ASKPASS-}" ]; then
+            sudo -A -v
+        elif [ -t 0 ]; then
             sudo -v
         elif [ -r /dev/tty ]; then
             sudo -v </dev/tty
@@ -285,7 +478,7 @@ if [ "$OS_TYPE" = "Linux" ]; then
         log_info "[DRY-RUN] Enable en_US.UTF-8 in /etc/locale.gen, run locale-gen and update-locale"
     else
         if grep -q "^# en_US.UTF-8 UTF-8" /etc/locale.gen 2>/dev/null; then
-            run_sudo sed -i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+            run_sudo sed_i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
         fi
         run_sudo locale-gen en_US.UTF-8
         run_sudo update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
@@ -300,13 +493,23 @@ log_success "Locale configured to en_US.UTF-8"
 # ------------------------------------------------------------------------------
 # Step 2: Timezone Configuration
 # ------------------------------------------------------------------------------
-log_step "Configuring Timezone to ${TIMEZONE}"
+if [ "$TIMEZONE_EXPLICIT" -eq 1 ]; then
+    log_step "Configuring Timezone to ${TIMEZONE}"
+else
+    log_step "Timezone Configuration (Preserving detected: ${TIMEZONE})"
+fi
 
 if [ "$OS_TYPE" = "Darwin" ]; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Set system timezone to ${TIMEZONE} via systemsetup"
+    if [ "$TIMEZONE_EXPLICIT" -eq 1 ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Set system timezone to ${TIMEZONE} via systemsetup"
+        else
+            run_sudo systemsetup -settimezone "$TIMEZONE" 2>/dev/null || true
+        fi
+        log_success "Timezone set to ${TIMEZONE}"
     else
-        run_sudo systemsetup -settimezone "$TIMEZONE" 2>/dev/null || true
+        log_info "macOS system timezone retained: ${TIMEZONE}"
+        log_success "Timezone preserved as ${TIMEZONE}"
     fi
 else
     if [ ! -f "/usr/share/zoneinfo/${TIMEZONE}" ]; then
@@ -315,17 +518,30 @@ else
     fi
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Setting system timezone to ${TIMEZONE} via timedatectl and /etc/localtime"
-    else
-        if command -v timedatectl >/dev/null 2>&1 && timedatectl 2>/dev/null | grep -q "Time zone"; then
-            run_sudo timedatectl set-timezone "$TIMEZONE" || true
+        if [ "$TIMEZONE_EXPLICIT" -eq 1 ]; then
+            log_info "[DRY-RUN] Setting system timezone to ${TIMEZONE} via timedatectl and /etc/localtime"
+        else
+            log_info "[DRY-RUN] Ensuring tzdata matches detected timezone ${TIMEZONE}"
         fi
-        run_sudo ln -fs "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
-        echo "$TIMEZONE" | run_sudo tee /etc/timezone >/dev/null
-        run_sudo dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1 || true
+    else
+        if [ "$TIMEZONE_EXPLICIT" -eq 1 ]; then
+            if command -v timedatectl >/dev/null 2>&1 && timedatectl 2>/dev/null | grep -q "Time zone"; then
+                run_sudo timedatectl set-timezone "$TIMEZONE" || true
+            fi
+            run_sudo ln -fs "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+            echo "$TIMEZONE" | run_sudo tee /etc/timezone >/dev/null
+            run_sudo dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1 || true
+            log_success "Timezone set to ${TIMEZONE}"
+        else
+            if [ ! -e /etc/localtime ] || [ -L /etc/localtime ]; then
+                run_sudo ln -fs "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+            fi
+            echo "$TIMEZONE" | run_sudo tee /etc/timezone >/dev/null
+            run_sudo dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1 || true
+            log_success "Timezone configured as ${TIMEZONE} (autodetected)"
+        fi
     fi
 fi
-log_success "Timezone set to ${TIMEZONE}"
 
 # ------------------------------------------------------------------------------
 # Step 3: Package Manager & System Upgrades
@@ -335,11 +551,37 @@ if [ "$OS_TYPE" = "Darwin" ]; then
 
     # Install Xcode Command Line Tools if missing
     if ! xcode-select -p >/dev/null 2>&1; then
-        log_info "Installing Xcode Command Line Tools..."
+        log_info "Xcode Command Line Tools missing. Initiating installation..."
         if [ "$DRY_RUN" -eq 1 ]; then
-            log_info "[DRY-RUN] Run xcode-select --install"
+            log_info "[DRY-RUN] Install Xcode Command Line Tools via softwareupdate or xcode-select"
         else
-            run_cmd xcode-select --install || true
+            # Attempt headless installation first using softwareupdate trigger file
+            local clt_placeholder="/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress"
+            run_sudo touch "${clt_placeholder}"
+            local clt_label
+            clt_label="$(/usr/sbin/softwareupdate -l 2>/dev/null | grep -B 1 -E 'Command Line Tools' | awk -F'*' '/^ *\*/ {print $2}' | sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n1)"
+            if [ -n "${clt_label}" ]; then
+                log_info "Installing ${clt_label} headlessly via softwareupdate..."
+                run_sudo /usr/sbin/softwareupdate -i "${clt_label}" || true
+                run_sudo /usr/bin/xcode-select --switch /Library/Developer/CommandLineTools 2>/dev/null || true
+            fi
+            run_sudo rm -f "${clt_placeholder}"
+
+            # Fallback to standard xcode-select if not yet active
+            if ! xcode-select -p >/dev/null 2>&1; then
+                run_cmd xcode-select --install || true
+            fi
+        fi
+    fi
+
+    # Enable Touch ID for sudo on macOS (persists across OS updates via sudo_local)
+    if [ -f /etc/pam.d/sudo_local.template ] && [ ! -f /etc/pam.d/sudo_local ]; then
+        log_info "Enabling Touch ID for sudo via /etc/pam.d/sudo_local..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Enable pam_tid.so in /etc/pam.d/sudo_local"
+        else
+            run_sudo cp /etc/pam.d/sudo_local.template /etc/pam.d/sudo_local
+            run_sudo sed_i 's/^#auth/auth/' /etc/pam.d/sudo_local
         fi
     fi
 
@@ -480,11 +722,11 @@ if [ "$SKIP_TOOLS" -eq 0 ]; then
         else
             mkdir -p "${TARGET_HOME}/.local/bin"
             if command -v batcat >/dev/null 2>&1 && [ ! -e "${TARGET_HOME}/.local/bin/bat" ]; then
-                ln -sf "$(which batcat)" "${TARGET_HOME}/.local/bin/bat"
+                ln -sf "$(command -v batcat)" "${TARGET_HOME}/.local/bin/bat"
                 log_info "Symlinked batcat -> ~/.local/bin/bat"
             fi
             if command -v fdfind >/dev/null 2>&1 && [ ! -e "${TARGET_HOME}/.local/bin/fd" ]; then
-                ln -sf "$(which fdfind)" "${TARGET_HOME}/.local/bin/fd"
+                ln -sf "$(command -v fdfind)" "${TARGET_HOME}/.local/bin/fd"
                 log_info "Symlinked fdfind -> ~/.local/bin/fd"
             fi
         fi
@@ -523,6 +765,7 @@ if [ "$SKIP_EMBEDDED" -eq 0 ]; then
             libnewlib-arm-none-eabi
             libstdc++-arm-none-eabi-newlib
             gdb-multiarch
+            openocd
             libudev-dev
             libusb-1.0-0-dev
             tio
@@ -540,8 +783,9 @@ if [ "$SKIP_EMBEDDED" -eq 0 ]; then
         else
             UDEV_RULES_URL="https://probe.rs/files/69-probe-rs.rules"
             UDEV_TARGET="/etc/udev/rules.d/69-probe-rs.rules"
-            if curl -fsSL "$UDEV_RULES_URL" -o /tmp/69-probe-rs.rules 2>/dev/null; then
-                run_sudo mv /tmp/69-probe-rs.rules "$UDEV_TARGET"
+            UDEV_TEMP="${BOOTSTRAP_TMP_DIR}/69-probe-rs.rules"
+            if downloader "$UDEV_RULES_URL" "$UDEV_TEMP"; then
+                run_sudo mv "$UDEV_TEMP" "$UDEV_TARGET"
                 run_sudo chmod 644 "$UDEV_TARGET"
                 run_sudo udevadm control --reload-rules 2>/dev/null || true
                 run_sudo udevadm trigger 2>/dev/null || true
@@ -602,9 +846,18 @@ if [ "$SKIP_ZSH" -eq 0 ]; then
     else
         if [ -f "$ZSHRC" ]; then
             if grep -q "^plugins=(" "$ZSHRC"; then
-                sed -i "s/^plugins=(.*)/plugins=($TARGET_PLUGINS)/" "$ZSHRC"
+                sed_i "s/^plugins=(.*)/plugins=($TARGET_PLUGINS)/" "$ZSHRC"
             elif ! grep -q "plugins=" "$ZSHRC"; then
                 echo "plugins=($TARGET_PLUGINS)" >>"$ZSHRC"
+            fi
+            if ! grep -q 'GPG_TTY' "$ZSHRC"; then
+                cat <<'EOF' >>"$ZSHRC"
+
+# Attach GPG pinentry to the active terminal
+if [ -t 0 ]; then
+    export GPG_TTY=$(tty)
+fi
+EOF
             fi
             if ! grep -q 'export PATH="\$HOME/\.local/bin:\$HOME/\.cargo/bin:\$PATH"' "$ZSHRC"; then
                 echo '' >>"$ZSHRC"
@@ -640,14 +893,24 @@ EOF
         fi
     fi
 
-    # Set default shell to zsh (Linux only; macOS defaults to zsh)
-    if [ "$OS_TYPE" = "Linux" ]; then
-        if [ "$DRY_RUN" -eq 1 ]; then
-            log_info "[DRY-RUN] Change default shell to zsh for ${TARGET_USER}"
-        else
-            ZSH_BIN="$(which zsh)"
-            CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "")"
-            if [ "$CURRENT_SHELL" != "$ZSH_BIN" ] && [ -n "$ZSH_BIN" ]; then
+    # Set default shell to zsh (Linux & macOS)
+    ZSH_BIN="$(command -v zsh)"
+    if [ -n "$ZSH_BIN" ]; then
+        if [ "$OS_TYPE" = "Darwin" ]; then
+            # Ensure Homebrew/custom Zsh is registered in /etc/shells on macOS
+            if ! grep -Fxq "$ZSH_BIN" /etc/shells 2>/dev/null; then
+                if [ "$DRY_RUN" -eq 1 ]; then
+                    log_info "[DRY-RUN] Add ${ZSH_BIN} to /etc/shells"
+                else
+                    echo "$ZSH_BIN" | run_sudo tee -a /etc/shells >/dev/null
+                fi
+            fi
+        fi
+        CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "$SHELL")"
+        if [ "$CURRENT_SHELL" != "$ZSH_BIN" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log_info "[DRY-RUN] Change default shell to ${ZSH_BIN} for ${TARGET_USER}"
+            else
                 log_info "Changing default shell to ${ZSH_BIN} for ${TARGET_USER}..."
                 run_sudo chsh -s "$ZSH_BIN" "$TARGET_USER" || true
             fi
@@ -676,8 +939,8 @@ if [ "$SKIP_DOTFILES" -eq 0 ]; then
         if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/${rel_path}" ]; then
             cp "${SCRIPT_DIR}/${rel_path}" "$dest"
         else
-            curl -fsSL "${PAGES_BASE}/${rel_path}" -o "$dest" 2>/dev/null ||
-                curl -fsSL "${RAW_REPO_BASE}/${rel_path}" -o "$dest" 2>/dev/null || true
+            retry 3 downloader "${PAGES_BASE}/${rel_path}" "$dest" || \
+                retry 3 downloader "${RAW_REPO_BASE}/${rel_path}" "$dest" || true
         fi
         chown "${TARGET_USER}" "$dest" 2>/dev/null || true
     }
@@ -881,6 +1144,17 @@ EOF
         run_user "git config --global rebase.autoStash true"
         run_user "git config --global merge.autoStash true"
 
+        # Platform-specific Git Credential Manager
+        if [ "$OS_TYPE" = "Darwin" ]; then
+            run_user "git config --global credential.helper osxkeychain"
+        elif [ "$IS_WSL" -eq 1 ]; then
+            if [ -x "/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe" ]; then
+                run_user "git config --global credential.helper '/mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe'"
+            elif [ -x "/mnt/c/Program Files/Git/mingw64/libexec/git-core/git-credential-manager.exe" ]; then
+                run_user "git config --global credential.helper '/mnt/c/Program\\ Files/Git/mingw64/libexec/git-core/git-credential-manager.exe'"
+            fi
+        fi
+
         # Set default git identity if not present
         CURRENT_GIT_NAME="$(run_user 'git config --global user.name' 2>/dev/null || true)"
         CURRENT_GIT_EMAIL="$(run_user 'git config --global user.email' 2>/dev/null || true)"
@@ -1012,10 +1286,14 @@ if [ "$SKIP_RUST" -eq 0 ]; then
         run_user 'curl --proto "=https" --tlsv1.2 -LsSf https://github.com/probe-rs/probe-rs/releases/latest/download/probe-rs-tools-installer.sh | sh || true'
     fi
 
-    # Install cargo subcommands via cargo-binstall
+    # Install cargo subcommands & embedded utilities via cargo-binstall
     BINSTALL_BIN="${CARGO_HOME}/bin/cargo-binstall"
-    log_info "Installing cargo-deny, cargo-llvm-cov, cargo-generate..."
-    run_user "${BINSTALL_BIN} --no-confirm cargo-deny cargo-llvm-cov cargo-generate || true"
+    CARGO_TOOLS=(cargo-deny cargo-llvm-cov cargo-generate cargo-binutils)
+    if [ "$SKIP_EMBEDDED" -eq 0 ]; then
+        CARGO_TOOLS+=(espflash cargo-espflash)
+    fi
+    log_info "Installing cargo tools: ${CARGO_TOOLS[*]}..."
+    run_user "${BINSTALL_BIN} --no-confirm ${CARGO_TOOLS[*]} || true"
 
     log_success "Rust toolchain and embedded tooling installed"
 else
@@ -1051,7 +1329,7 @@ printf "${BOLD}${GREEN}=========================================================
 
 cat <<EOF
 Summary of changes:
-  • Operating System: ${OS_TYPE}
+  • Operating System: ${OS_TYPE} (${ARCH_TYPE})
   • Package Manager: $([ "$OS_TYPE" = "Darwin" ] && echo "Homebrew" || echo "APT (Debian/Ubuntu)")
   • Timezone: ${TIMEZONE}
   • Core Dev: cmake, ninja, clang/llvm, git, jq, tmux, tree, etc.
@@ -1063,7 +1341,7 @@ Summary of changes:
   • Maintenance: ~/.local/bin/full-upgrade (alias: up) with omz & brew update
   • Productivity: .editorconfig, .hushlogin, optimized custom global cdr completions setup
   • Security: ED25519 SSH & GPG signing keys verified / configured
-  • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall
+  • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall, cargo-binutils, espflash
   • Editor: Zed editor installed to ~/.local/bin/zed
 
 Next steps:

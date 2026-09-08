@@ -86,7 +86,7 @@ if command -v rustup >/dev/null 2>&1; then
     rustup update stable || true
     if command -v cargo-binstall >/dev/null 2>&1; then
         log_info "Upgrading cargo tools..."
-        cargo binstall --no-confirm --continue-on-failure cargo-deny cargo-llvm-cov cargo-generate || true
+        cargo binstall --no-confirm --continue-on-failure cargo-deny cargo-llvm-cov cargo-generate cargo-binutils espflash cargo-espflash || true
     fi
     log_success "Rust toolchain up to date"
 fi
