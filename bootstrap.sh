@@ -1281,7 +1281,27 @@ if only_allows zsh && [ "$SKIP_ZSH" -eq 0 ]; then
     else
         if [ -f "$ZSHRC" ]; then
             if grep -q "^plugins=(" "$ZSHRC"; then
-                sed_i "s/^plugins=(.*)/plugins=($TARGET_PLUGINS)/" "$ZSHRC"
+                # Merge with whatever plugins are already enabled instead of
+                # overwriting the line, so existing choices aren't dropped.
+                CURRENT_PLUGINS_LINE="$(grep -m1 "^plugins=(" "$ZSHRC")"
+                CURRENT_PLUGINS_STR="${CURRENT_PLUGINS_LINE#plugins=(}"
+                CURRENT_PLUGINS_STR="${CURRENT_PLUGINS_STR%)}"
+                # shellcheck disable=SC2206 # intentional word-splitting to merge plugin lists
+                CURRENT_PLUGINS_ARR=($CURRENT_PLUGINS_STR)
+                # shellcheck disable=SC2206
+                TARGET_PLUGINS_ARR=($TARGET_PLUGINS)
+                MERGED_PLUGINS=()
+                # "${arr[@]-}" (not just "${arr[@]}") because macOS's default
+                # /bin/bash is 3.2, which treats a zero-element array as unset
+                # under `set -u` and would abort with "unbound variable".
+                for p in "${CURRENT_PLUGINS_ARR[@]-}" "${TARGET_PLUGINS_ARR[@]-}"; do
+                    [ -n "$p" ] || continue
+                    case " ${MERGED_PLUGINS[*]-} " in
+                        *" $p "*) ;;
+                        *) MERGED_PLUGINS+=("$p") ;;
+                    esac
+                done
+                sed_i "s/^plugins=(.*)/plugins=(${MERGED_PLUGINS[*]-})/" "$ZSHRC"
             elif ! grep -q "plugins=" "$ZSHRC"; then
                 echo "plugins=($TARGET_PLUGINS)" >>"$ZSHRC"
             fi
@@ -1310,10 +1330,13 @@ elif [ -x /usr/local/bin/brew ]; then
 fi
 EOF
             fi
-            if ! grep -q 'DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
+            # Anchored (not just grep -q) so a commented-out template default
+            # like `# DISABLE_MAGIC_FUNCTIONS="true"` isn't mistaken for an
+            # active setting and the real line never gets added.
+            if ! grep -qE '^DISABLE_MAGIC_FUNCTIONS="true"' "$ZSHRC"; then
                 echo 'DISABLE_MAGIC_FUNCTIONS="true"' >>"$ZSHRC"
             fi
-            if ! grep -q 'DISABLE_UNTRACKED_FILES_DIRTY="true"' "$ZSHRC"; then
+            if ! grep -qE '^DISABLE_UNTRACKED_FILES_DIRTY="true"' "$ZSHRC"; then
                 echo 'DISABLE_UNTRACKED_FILES_DIRTY="true"' >>"$ZSHRC"
             fi
             if ! grep -q 'fzf --zsh' "$ZSHRC"; then
@@ -1341,7 +1364,17 @@ EOF
                 fi
             fi
         fi
-        CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "$SHELL")"
+        # getent doesn't exist on macOS (only real on Linux); without this
+        # fallback CURRENT_SHELL resolves to an empty string there, making
+        # every run think the shell needs changing and re-triggering a
+        # sudo-gated chsh even when it's already correct.
+        if command -v getent >/dev/null 2>&1; then
+            CURRENT_SHELL="$(getent passwd "${TARGET_USER}" 2>/dev/null | cut -d: -f7 || echo "$SHELL")"
+        elif command -v dscl >/dev/null 2>&1; then
+            CURRENT_SHELL="$(dscl . -read "/Users/${TARGET_USER}" UserShell 2>/dev/null | awk '{print $2}' || echo "$SHELL")"
+        else
+            CURRENT_SHELL="$SHELL"
+        fi
         if [ "$CURRENT_SHELL" != "$ZSH_BIN" ]; then
             if [ "$DRY_RUN" -eq 1 ]; then
                 log_info "[DRY-RUN] Change default shell to ${ZSH_BIN} for ${TARGET_USER}"
@@ -1578,7 +1611,13 @@ EOF
         set_git_default "core.editor" "vim"
         set_git_default "init.defaultBranch" "main"
         set_git_default "init.templateDir" "${TARGET_HOME}/.git_template"
-        set_git_default "core.hooksPath" "${TARGET_HOME}/.githooks"
+        # core.hooksPath runs the post-checkout .editorconfig auto-seed in
+        # EVERY repo on the machine. When a personal identity is configured
+        # (--personal-gitdir), scope it there instead of setting it globally,
+        # so it never fires in unrelated (e.g. work) repos.
+        if [ -z "$PERSONAL_GITDIR" ]; then
+            set_git_default "core.hooksPath" "${TARGET_HOME}/.githooks"
+        fi
         set_git_default "core.excludesfile" "${TARGET_HOME}/.gitignore"
         set_git_default "commit.template" "${TARGET_HOME}/.gitmessage"
         set_git_default "commit.cleanup" "strip"
@@ -1780,6 +1819,7 @@ EOF
                         set_git_default "user.signingkey" "$PERSONAL_GPG_KEY" "$PERSONAL_CONFIG_FILE"
                         set_git_default "commit.gpgsign" "true" "$PERSONAL_CONFIG_FILE"
                         set_git_default "gpg.program" "gpg" "$PERSONAL_CONFIG_FILE"
+                        set_git_default "core.hooksPath" "${TARGET_HOME}/.githooks" "$PERSONAL_CONFIG_FILE"
                         chown "${TARGET_USER}" "$PERSONAL_CONFIG_FILE" 2>/dev/null || true
 
                         EXISTING_INCLUDE="$(run_user "git config --global --get $(printf '%q' "$INCLUDEIF_KEY")" 2>/dev/null || true)"
