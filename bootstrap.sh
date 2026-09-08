@@ -59,6 +59,7 @@ SKIP_TOOLS=0
 SKIP_DOTFILES=0
 SKIP_ZED=0
 SKIP_KEYS=0
+FORCE_GIT_DEFAULTS=0
 DRY_RUN=0
 NEEDS_SUDO=1
 BOOTSTRAP_VERSION="0.1.1"
@@ -320,6 +321,11 @@ backup_path() {
         return 0
     fi
 
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "[DRY-RUN] Would back up ${src}"
+        return 0
+    fi
+
     backup_init
     if grep -Fxq "$rel" "$BACKUP_DIR/manifest.txt" 2>/dev/null; then
         return 0
@@ -488,6 +494,10 @@ Options:
       --skip-tools      Skip modern CLI utilities installation
       --skip-dotfiles   Skip curated dotfiles, tmux, vim, and shell aliases
       --skip-keys       Skip ED25519 SSH and GPG key generation
+      --force-git-defaults
+                        Overwrite existing git config values with this script's
+                        opinionated defaults (by default, only unset values are
+                        applied so your current git config is left alone)
       --dry-run         Print actions without executing commands
       --rollback        Restore the newest bootstrap backup (user dotfiles)
       --check-update    Compare local state against the remote bootstrap version
@@ -552,6 +562,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-keys)
             SKIP_KEYS=1
+            shift
+            ;;
+        --force-git-defaults)
+            FORCE_GIT_DEFAULTS=1
             shift
             ;;
         --dry-run)
@@ -771,6 +785,22 @@ run_user() {
             bash -c "$*"
         fi
     fi
+}
+
+# Sets a global git config value only if it isn't already configured, so a
+# re-run never clobbers config you set up yourself. Pass --force-git-defaults
+# to intentionally reset a key to this script's opinionated default.
+set_git_default() {
+    local key="$1"
+    local value="$2"
+    local current=""
+
+    current="$(run_user "git config --global --get $(printf '%q' "$key")" 2>/dev/null || true)"
+    if [ -n "$current" ] && [ "$FORCE_GIT_DEFAULTS" -eq 0 ]; then
+        log_info "Keeping existing git config ${key}=${current} (use --force-git-defaults to override)"
+        return 0
+    fi
+    run_user "git config --global $(printf '%q' "$key") $(printf '%q' "$value")"
 }
 
 # Setup isolated temporary workspace and sudo keep-alive
@@ -1505,49 +1535,87 @@ EOF
     # Configure Git Defaults, Core Settings, and Aliases
     log_info "Configuring Git defaults, push settings, commit template, and aliases..."
     if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[DRY-RUN] Set git core (hooksPath=~/.githooks, templateDir), push.autoSetupRemote, rebase/merge autoStash, commit template, and aliases"
+        log_info "[DRY-RUN] Set git core (hooksPath=~/.githooks, templateDir), push.autoSetupRemote, rebase/merge autoStash, commit template, and aliases (only for values not already configured, unless --force-git-defaults)"
     else
-        run_user "git config --global core.editor vim"
-        run_user "git config --global init.defaultBranch main"
-        run_user "git config --global init.templateDir '${TARGET_HOME}/.git_template'"
-        run_user "git config --global core.hooksPath '${TARGET_HOME}/.githooks'"
-        run_user "git config --global core.excludesfile ~/.gitignore"
-        run_user "git config --global commit.template ~/.gitmessage"
-        run_user "git config --global commit.cleanup strip"
-        run_user "git config --global push.autoSetupRemote true"
-        run_user "git config --global rebase.autoStash true"
-        run_user "git config --global merge.autoStash true"
+        set_git_default "core.editor" "vim"
+        set_git_default "init.defaultBranch" "main"
+        set_git_default "init.templateDir" "${TARGET_HOME}/.git_template"
+        set_git_default "core.hooksPath" "${TARGET_HOME}/.githooks"
+        set_git_default "core.excludesfile" "${TARGET_HOME}/.gitignore"
+        set_git_default "commit.template" "${TARGET_HOME}/.gitmessage"
+        set_git_default "commit.cleanup" "strip"
+        set_git_default "push.autoSetupRemote" "true"
+        set_git_default "rebase.autoStash" "true"
+        set_git_default "merge.autoStash" "true"
 
         # Platform-specific Git Credential Manager
         if [ "$OS_TYPE" = "Darwin" ]; then
-            run_user "git config --global credential.helper osxkeychain"
+            set_git_default "credential.helper" "osxkeychain"
         elif [ "$IS_WSL" -eq 1 ]; then
             if [ -x "/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe" ]; then
-                run_user "git config --global credential.helper '/mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe'"
+                set_git_default "credential.helper" "/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe"
             elif [ -x "/mnt/c/Program Files/Git/mingw64/libexec/git-core/git-credential-manager.exe" ]; then
-                run_user "git config --global credential.helper '/mnt/c/Program\\ Files/Git/mingw64/libexec/git-core/git-credential-manager.exe'"
+                set_git_default "credential.helper" "/mnt/c/Program Files/Git/mingw64/libexec/git-core/git-credential-manager.exe"
             fi
         fi
 
-        # Set default git identity if not present
+        # Prompt for git identity if not already configured
+        prompt_for_value() {
+            local prompt_text="$1"
+            local answer=""
+
+            if [ -t 0 ]; then
+                printf "${CYAN}%s${RESET}" "$prompt_text" >&2
+                read -r answer || true
+            elif [ -r /dev/tty ]; then
+                printf "${CYAN}%s${RESET}" "$prompt_text" >&2
+                read -r answer </dev/tty || true
+            fi
+
+            printf '%s' "$answer"
+            return 0
+        }
+
         CURRENT_GIT_NAME="$(run_user 'git config --global user.name' 2>/dev/null || true)"
         CURRENT_GIT_EMAIL="$(run_user 'git config --global user.email' 2>/dev/null || true)"
+
         if [ -z "$CURRENT_GIT_NAME" ]; then
-            run_user "git config --global user.name 'Gerzain Mata'"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log_info "[DRY-RUN] Prompt for git user.name (not currently configured)"
+            else
+                GIT_NAME_INPUT="$(prompt_for_value 'Git user.name is not set. Enter the name to use for commits: ')"
+                if [ -n "$GIT_NAME_INPUT" ]; then
+                    run_user "git config --global user.name $(printf '%q' "$GIT_NAME_INPUT")"
+                    CURRENT_GIT_NAME="$GIT_NAME_INPUT"
+                else
+                    log_warn "No git user.name provided (no terminal input available or empty response); leaving user.name unconfigured."
+                fi
+            fi
         fi
+
         if [ -z "$CURRENT_GIT_EMAIL" ]; then
-            run_user "git config --global user.email 'leftger@gmail.com'"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                log_info "[DRY-RUN] Prompt for git user.email (not currently configured)"
+            else
+                GIT_EMAIL_INPUT="$(prompt_for_value 'Git user.email is not set. Enter the email to use for commits: ')"
+                if [ -n "$GIT_EMAIL_INPUT" ]; then
+                    run_user "git config --global user.email $(printf '%q' "$GIT_EMAIL_INPUT")"
+                    CURRENT_GIT_EMAIL="$GIT_EMAIL_INPUT"
+                else
+                    log_warn "No git user.email provided (no terminal input available or empty response); leaving user.email unconfigured."
+                fi
+            fi
         fi
 
         # Install productivity aliases
-        run_user "git config --global alias.caa 'commit --amend --all'"
-        run_user "git config --global alias.caane 'commit --amend --all --no-edit'"
-        run_user "git config --global alias.cob 'checkout -b'"
-        run_user "git config --global alias.apply-gitignore '!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f'"
+        set_git_default "alias.caa" "commit --amend --all"
+        set_git_default "alias.caane" "commit --amend --all --no-edit"
+        set_git_default "alias.cob" "checkout -b"
+        set_git_default "alias.apply-gitignore" '!f() { set -ex; git rm -r --cached . >/dev/null; git add .; }; f'
 
         # Install pa alias
         PA_CMD='!f() { [ -d "$1" ] && { d="$1"; shift; } || d="."; for r in "$d"/*/; do [ -e "$r/.git" ] || continue; b=$(git -C "$r" branch --show-current 2>/dev/null); [ -n "$b" ] || continue; echo "==> $(basename "$r") ($b)..."; git -C "$r" config remote.upstream.url >/dev/null 2>&1 && git -C "$r" pull upstream "$b" "$@"; git -C "$r" pull origin "$b" "$@"; done; }; f'
-        run_user "git config --global alias.pa '$PA_CMD'"
+        set_git_default "alias.pa" "$PA_CMD"
     fi
 
     # --------------------------------------------------------------------------
@@ -1556,8 +1624,8 @@ EOF
     if [ "$SKIP_KEYS" -eq 0 ]; then
         log_info "Verifying ED25519 SSH and GPG keys..."
 
-        KEY_USER_NAME="$(run_user 'git config --global user.name' 2>/dev/null || echo 'Gerzain Mata')"
-        KEY_USER_EMAIL="$(run_user 'git config --global user.email' 2>/dev/null || echo 'leftger@gmail.com')"
+        KEY_USER_NAME="$(run_user 'git config --global user.name' 2>/dev/null || true)"
+        KEY_USER_EMAIL="$(run_user 'git config --global user.email' 2>/dev/null || true)"
 
         # 1. ED25519 SSH Key
         SSH_DIR="${TARGET_HOME}/.ssh"
@@ -1583,26 +1651,35 @@ EOF
         # 2. ED25519 GPG Key
         if command -v gpg >/dev/null 2>&1; then
             if ! run_user "gpg --list-secret-keys 2>/dev/null" | grep -q 'sec'; then
-                log_info "No GPG secret key found. Generating ED25519 GPG key..."
-                if [ "$DRY_RUN" -eq 1 ]; then
-                    log_info "[DRY-RUN] gpg --batch --passphrase '' --quick-generate-key '${KEY_USER_NAME} <${KEY_USER_EMAIL}>' ed25519 default 0"
+                if [ -z "$KEY_USER_NAME" ] || [ -z "$KEY_USER_EMAIL" ]; then
+                    log_warn "Git user.name/user.email are not configured; skipping GPG key generation."
                 else
-                    run_user "gpg --batch --passphrase '' --quick-generate-key '${KEY_USER_NAME} <${KEY_USER_EMAIL}>' ed25519 default 0"
-                    GPG_KEY_ID="$(run_user "gpg --list-secret-keys --with-colons '${KEY_USER_EMAIL}' 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
-                    if [ -n "$GPG_KEY_ID" ]; then
-                        run_user "git config --global user.signingkey '$GPG_KEY_ID'"
-                        run_user "git config --global commit.gpgsign true"
-                        run_user "git config --global gpg.program gpg"
-                        log_success "ED25519 GPG key generated (Key ID: ${GPG_KEY_ID}) and configured for Git commit signing"
+                    log_info "No GPG secret key found. Generating ED25519 GPG key..."
+                    if [ "$DRY_RUN" -eq 1 ]; then
+                        log_info "[DRY-RUN] gpg --batch --passphrase '' --quick-generate-key '${KEY_USER_NAME} <${KEY_USER_EMAIL}>' ed25519 default 0"
+                    else
+                        run_user "gpg --batch --passphrase '' --quick-generate-key '${KEY_USER_NAME} <${KEY_USER_EMAIL}>' ed25519 default 0"
+                        GPG_KEY_ID="$(run_user "gpg --list-secret-keys --with-colons '${KEY_USER_EMAIL}' 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                        if [ -n "$GPG_KEY_ID" ]; then
+                            set_git_default "user.signingkey" "$GPG_KEY_ID"
+                            set_git_default "commit.gpgsign" "true"
+                            set_git_default "gpg.program" "gpg"
+                            log_success "ED25519 GPG key generated (Key ID: ${GPG_KEY_ID}) and configured for Git commit signing"
+                        fi
                     fi
                 fi
             else
                 log_info "GPG secret key already present."
-                EXISTING_GPG_KEY="$(run_user "gpg --list-secret-keys --with-colons 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                EXISTING_GPG_KEY=""
+                if [ -n "$KEY_USER_EMAIL" ]; then
+                    EXISTING_GPG_KEY="$(run_user "gpg --list-secret-keys --with-colons '${KEY_USER_EMAIL}' 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                fi
                 if [ -n "$EXISTING_GPG_KEY" ] && [ "$DRY_RUN" -eq 0 ]; then
-                    run_user "git config --global user.signingkey '$EXISTING_GPG_KEY'"
-                    run_user "git config --global commit.gpgsign true"
-                    run_user "git config --global gpg.program gpg"
+                    set_git_default "user.signingkey" "$EXISTING_GPG_KEY"
+                    set_git_default "commit.gpgsign" "true"
+                    set_git_default "gpg.program" "gpg"
+                else
+                    log_info "No GPG secret key matches ${KEY_USER_EMAIL:-your configured git email}; leaving existing signing configuration untouched."
                 fi
             fi
         fi
