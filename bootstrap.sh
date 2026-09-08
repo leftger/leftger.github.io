@@ -60,6 +60,9 @@ SKIP_DOTFILES=0
 SKIP_ZED=0
 SKIP_KEYS=0
 FORCE_GIT_DEFAULTS=0
+PERSONAL_EMAIL=""
+PERSONAL_NAME=""
+PERSONAL_GITDIR=""
 DRY_RUN=0
 NEEDS_SUDO=1
 BOOTSTRAP_VERSION="0.1.1"
@@ -498,6 +501,21 @@ Options:
                         Overwrite existing git config values with this script's
                         opinionated defaults (by default, only unset values are
                         applied so your current git config is left alone)
+      --personal-email <EMAIL>
+                        Configure a second, directory-scoped git identity (e.g.
+                        for personal projects on a work machine): generates a
+                        dedicated ED25519 GPG key for <EMAIL> if one doesn't
+                        already exist, and writes user.email/user.signingkey/
+                        commit.gpgsign into a scoped .gitconfig under
+                        --personal-gitdir instead of your global config, so
+                        those commits never get signed with your primary key.
+                        Requires --personal-gitdir.
+      --personal-name <NAME>
+                        Name to use for the --personal-email identity
+                        (default: your existing global git user.name)
+      --personal-gitdir <PATH>
+                        Directory tree (e.g. ~/personal) that should use the
+                        --personal-email identity via git's includeIf.gitdir
       --dry-run         Print actions without executing commands
       --rollback        Restore the newest bootstrap backup (user dotfiles)
       --check-update    Compare local state against the remote bootstrap version
@@ -567,6 +585,18 @@ while [[ $# -gt 0 ]]; do
         --force-git-defaults)
             FORCE_GIT_DEFAULTS=1
             shift
+            ;;
+        --personal-email)
+            PERSONAL_EMAIL="$2"
+            shift 2
+            ;;
+        --personal-name)
+            PERSONAL_NAME="$2"
+            shift 2
+            ;;
+        --personal-gitdir)
+            PERSONAL_GITDIR="$2"
+            shift 2
             ;;
         --dry-run)
             DRY_RUN=1
@@ -787,20 +817,28 @@ run_user() {
     fi
 }
 
-# Sets a global git config value only if it isn't already configured, so a
-# re-run never clobbers config you set up yourself. Pass --force-git-defaults
-# to intentionally reset a key to this script's opinionated default.
+# Sets a git config value only if it isn't already configured, so a re-run
+# never clobbers config you set up yourself. Pass --force-git-defaults to
+# intentionally reset a key to this script's opinionated default. By default
+# operates on the global config; pass a config file path as the 3rd argument
+# to instead operate on that file (e.g. a directory-scoped includeIf config).
 set_git_default() {
     local key="$1"
     local value="$2"
+    local config_file="${3:-}"
+    local scope="--global"
     local current=""
 
-    current="$(run_user "git config --global --get $(printf '%q' "$key")" 2>/dev/null || true)"
+    if [ -n "$config_file" ]; then
+        scope="-f $(printf '%q' "$config_file")"
+    fi
+
+    current="$(run_user "git config ${scope} --get $(printf '%q' "$key")" 2>/dev/null || true)"
     if [ -n "$current" ] && [ "$FORCE_GIT_DEFAULTS" -eq 0 ]; then
         log_info "Keeping existing git config ${key}=${current} (use --force-git-defaults to override)"
         return 0
     fi
-    run_user "git config --global $(printf '%q' "$key") $(printf '%q' "$value")"
+    run_user "git config ${scope} $(printf '%q' "$key") $(printf '%q' "$value")"
 }
 
 # Setup isolated temporary workspace and sudo keep-alive
@@ -1680,6 +1718,82 @@ EOF
                     set_git_default "gpg.program" "gpg"
                 else
                     log_info "No GPG secret key matches ${KEY_USER_EMAIL:-your configured git email}; leaving existing signing configuration untouched."
+                fi
+            fi
+        fi
+
+        # ----------------------------------------------------------------------
+        # Optional second identity (e.g. personal projects on a work machine):
+        # its own GPG key + a directory-scoped git config, wired up via
+        # includeIf.gitdir so it never inherits the primary signing key above.
+        # ----------------------------------------------------------------------
+        if [ -n "$PERSONAL_EMAIL" ]; then
+            if [ -z "$PERSONAL_GITDIR" ]; then
+                log_warn "--personal-email given without --personal-gitdir; skipping personal identity setup."
+            else
+                PERSONAL_NAME="${PERSONAL_NAME:-$CURRENT_GIT_NAME}"
+
+                # Resolve to a real absolute path for filesystem operations
+                # (a literal "~" in a variable is never expanded by the shell).
+                # shellcheck disable=SC2088 # literal "~/" prefix match, not shell expansion
+                case "$PERSONAL_GITDIR" in
+                    "~/"*) PERSONAL_GITDIR="${TARGET_HOME}/${PERSONAL_GITDIR#"~/"}" ;;
+                    /*) ;;
+                    *) PERSONAL_GITDIR="${TARGET_HOME}/${PERSONAL_GITDIR}" ;;
+                esac
+                case "$PERSONAL_GITDIR" in
+                    */) ;;
+                    *) PERSONAL_GITDIR="${PERSONAL_GITDIR}/" ;;
+                esac
+                PERSONAL_CONFIG_FILE="${PERSONAL_GITDIR%/}/.gitconfig"
+
+                # For the includeIf key itself, prefer the same ~/-relative form
+                # git's own docs and most hand-written configs use, so a
+                # pre-existing entry for the same directory (however it was
+                # created) is recognized instead of duplicated.
+                PERSONAL_GITDIR_PATTERN="$PERSONAL_GITDIR"
+                # shellcheck disable=SC2088 # literal "~/" value for git's gitdir pattern, not shell expansion
+                case "$PERSONAL_GITDIR" in
+                    "${TARGET_HOME}/"*) PERSONAL_GITDIR_PATTERN="~/${PERSONAL_GITDIR#"${TARGET_HOME}/"}" ;;
+                esac
+                INCLUDEIF_KEY="includeIf.gitdir:${PERSONAL_GITDIR_PATTERN}.path"
+
+                log_info "Configuring personal git identity for ${PERSONAL_EMAIL} scoped to ${PERSONAL_GITDIR}"
+
+                if [ "$DRY_RUN" -eq 1 ]; then
+                    log_info "[DRY-RUN] Ensure GPG key for ${PERSONAL_EMAIL}, write ${PERSONAL_CONFIG_FILE}, and set ${INCLUDEIF_KEY}"
+                elif [ -z "$PERSONAL_NAME" ]; then
+                    log_warn "No name available for the personal identity (set --personal-name or configure git user.name first); skipping."
+                else
+                    PERSONAL_GPG_KEY="$(run_user "gpg --list-secret-keys --with-colons '${PERSONAL_EMAIL}' 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                    if [ -z "$PERSONAL_GPG_KEY" ]; then
+                        log_info "No GPG secret key found for ${PERSONAL_EMAIL}. Generating ED25519 GPG key..."
+                        run_user "gpg --batch --passphrase '' --quick-generate-key '${PERSONAL_NAME} <${PERSONAL_EMAIL}>' ed25519 default 0"
+                        PERSONAL_GPG_KEY="$(run_user "gpg --list-secret-keys --with-colons '${PERSONAL_EMAIL}' 2>/dev/null | awk -F: '/^sec:/ {print \$5}' | head -n1")"
+                    else
+                        log_info "GPG secret key for ${PERSONAL_EMAIL} already present."
+                    fi
+
+                    if [ -n "$PERSONAL_GPG_KEY" ]; then
+                        mkdir -p "$(dirname "$PERSONAL_CONFIG_FILE")"
+                        set_git_default "user.email" "$PERSONAL_EMAIL" "$PERSONAL_CONFIG_FILE"
+                        set_git_default "user.signingkey" "$PERSONAL_GPG_KEY" "$PERSONAL_CONFIG_FILE"
+                        set_git_default "commit.gpgsign" "true" "$PERSONAL_CONFIG_FILE"
+                        set_git_default "gpg.program" "gpg" "$PERSONAL_CONFIG_FILE"
+                        chown "${TARGET_USER}" "$PERSONAL_CONFIG_FILE" 2>/dev/null || true
+
+                        EXISTING_INCLUDE="$(run_user "git config --global --get $(printf '%q' "$INCLUDEIF_KEY")" 2>/dev/null || true)"
+                        if [ -z "$EXISTING_INCLUDE" ]; then
+                            run_user "git config --global $(printf '%q' "$INCLUDEIF_KEY") $(printf '%q' "$PERSONAL_CONFIG_FILE")"
+                            log_success "Added ${INCLUDEIF_KEY} -> ${PERSONAL_CONFIG_FILE}"
+                        else
+                            log_info "${INCLUDEIF_KEY} already set (-> ${EXISTING_INCLUDE}); leaving as-is."
+                        fi
+
+                        log_success "Personal git identity configured: ${PERSONAL_EMAIL} (key ${PERSONAL_GPG_KEY}) scoped to ${PERSONAL_GITDIR}"
+                    else
+                        log_warn "Could not determine a GPG key for ${PERSONAL_EMAIL}; personal identity not fully configured."
+                    fi
                 fi
             fi
         fi
