@@ -1731,7 +1731,7 @@ EOF
             if [ -z "$PERSONAL_GITDIR" ]; then
                 log_warn "--personal-email given without --personal-gitdir; skipping personal identity setup."
             else
-                PERSONAL_NAME="${PERSONAL_NAME:-$CURRENT_GIT_NAME}"
+                PERSONAL_NAME="${PERSONAL_NAME:-${CURRENT_GIT_NAME:-}}"
 
                 # Resolve to a real absolute path for filesystem operations
                 # (a literal "~" in a variable is never expanded by the shell).
