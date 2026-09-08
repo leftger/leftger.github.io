@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run ShellCheck on staged shell scripts.
+#
+# Activated for this repository via:
+#   git config core.hooksPath .githooks
+#
+# It intentionally uses warning-level severity so local checks match the
+# GitHub Actions ShellCheck workflow (.github/workflows/lint.yml).
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -z "$staged_files" ]; then
+    exit 0
+fi
+
+is_shell_file() {
+    local file="$1"
+    local first=""
+
+    case "$file" in
+        *.sh | *.bash | dotfiles/.bash_aliases)
+            return 0
+            ;;
+    esac
+
+    if [ -f "$file" ]; then
+        first="$(head -n 1 "$file" 2>/dev/null || true)"
+        if [[ "$first" =~ ^\#![[:space:]]*/[^[:space:]]*(env[[:space:]]+)?(ba|da|k|z)?sh([[:space:]]|$) ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+shell_files=()
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    if is_shell_file "$file"; then
+        shell_files+=("$file")
+    fi
+done <<< "$staged_files"
+
+if [ "${#shell_files[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+    echo "pre-commit: shellcheck is required to lint staged shell scripts." >&2
+    echo "  Install it from your package manager or https://github.com/koalaman/shellcheck" >&2
+    echo "  Example (Ubuntu/Debian): sudo apt install shellcheck" >&2
+    exit 1
+fi
+
+echo "pre-commit: running shellcheck on staged shell scripts"
+shellcheck -S warning "${shell_files[@]}"
+
+echo "pre-commit: shellcheck passed"

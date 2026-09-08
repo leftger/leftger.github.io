@@ -60,6 +60,12 @@ SKIP_DOTFILES=0
 SKIP_ZED=0
 SKIP_KEYS=0
 DRY_RUN=0
+NEEDS_SUDO=1
+BOOTSTRAP_VERSION="0.1.1"
+ROLLBACK=0
+CHECK_UPDATE=0
+ONLY_ACTIVE=0
+ONLY_SECTIONS=""
 
 # Color formatting (disabled when stdout is redirected to maintain clean logs)
 if [ -t 1 ]; then
@@ -233,29 +239,240 @@ detect_system_timezone() {
     echo "$detected_tz"
 }
 
+# Persist a plain-text copy of each log line. LOG_FILE is set after the
+# target user/home is resolved; until then logging remains console-only.
+log_append() {
+    if [ -n "${LOG_FILE:-}" ]; then
+        printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG_FILE" 2>/dev/null || true
+    fi
+}
+
 log_info() {
     printf "${BLUE}[INFO]${RESET} %s\n" "$*"
+    log_append "INFO: $*"
 }
 
 log_step() {
     printf "\n${BOLD}${CYAN}==>${RESET} ${BOLD}%s${RESET}\n" "$*"
+    log_append "STEP: $*"
 }
 
 log_success() {
     printf "${GREEN}[✓]${RESET} %s\n" "$*"
+    log_append "SUCCESS: $*"
 }
 
 log_warn() {
     printf "${YELLOW}[WARN]${RESET} %s\n" "$*" >&2
+    log_append "WARN: $*"
 }
 
 log_error() {
     printf "${RED}[ERROR]${RESET} %s\n" "$*" >&2
+    log_append "ERROR: $*"
+}
+
+# ------------------------------------------------------------------------------
+# Section gating for positive --*-only modes.
+# ------------------------------------------------------------------------------
+only_allows() {
+    local section="$1"
+
+    if [ "$ONLY_ACTIVE" -eq 0 ]; then
+        return 0
+    fi
+
+    case " $ONLY_SECTIONS " in
+        *" $section "*) return 0 ;;
+    esac
+    return 1
+}
+
+# ------------------------------------------------------------------------------
+# Timestamped backup / rollback helpers.
+# Backups are stored under:
+#   ~/.local/state/leftger-bootstrap/backups/<YYYYmmdd_HHMMSS>
+# Each backup keeps a manifest of the relative paths that existed before this
+# bootstrap run. --rollback restores the newest manifest-backed originals.
+# ------------------------------------------------------------------------------
+backup_init() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        return 0
+    fi
+    if [ -z "$BACKUP_DIR" ]; then
+        BACKUP_DIR="${BACKUP_ROOT}/$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        : >"$BACKUP_DIR/manifest.txt"
+        chown -R "${TARGET_USER}" "$BACKUP_DIR" 2>/dev/null || true
+        log_info "Created backup directory: ${BACKUP_DIR}"
+    fi
+}
+
+backup_path() {
+    local src="$1"
+    local rel=""
+    local dest=""
+
+    [ -e "$src" ] || [ -L "$src" ] || return 0
+    rel="${src#"${TARGET_HOME}/"}"
+    if [ -z "$rel" ] || [ "$rel" = "$src" ]; then
+        # Only paths inside the target home directory are backed up for now.
+        return 0
+    fi
+
+    backup_init
+    if grep -Fxq "$rel" "$BACKUP_DIR/manifest.txt" 2>/dev/null; then
+        return 0
+    fi
+
+    dest="$BACKUP_DIR/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp -a "$src" "$dest"
+    echo "$rel" >>"$BACKUP_DIR/manifest.txt"
+}
+
+backup_dotfiles() {
+    # Files/directories the dotfiles step is about to touch. This is called
+    # after backup_path() was already used by the Zsh step where applicable, so
+    # re-entry is harmless: the manifest keeps the ORIGINAL pre-bootstrap copy.
+    backup_path "${TARGET_HOME}/.bash_aliases"
+    backup_path "${TARGET_HOME}/.bashrc"
+    backup_path "${TARGET_HOME}/.zshrc"
+    backup_path "${TARGET_HOME}/.vimrc"
+    backup_path "${TARGET_HOME}/.vim/colors"
+    backup_path "${TARGET_HOME}/.gitignore"
+    backup_path "${TARGET_HOME}/.gitmessage"
+    backup_path "${TARGET_HOME}/.tmux.conf"
+    backup_path "${TARGET_HOME}/.editorconfig"
+    backup_path "${TARGET_HOME}/.githooks"
+    backup_path "${TARGET_HOME}/.git_template"
+    backup_path "${TARGET_HOME}/.gitconfig"
+    backup_path "${TARGET_HOME}/.config/git/config"
+    backup_path "${TARGET_HOME}/.hushlogin"
+    backup_path "${TARGET_HOME}/.local/bin/full-upgrade"
+    backup_path "${TARGET_HOME}/.oh-my-zsh/custom/plugins"
+    backup_path "${TARGET_HOME}/.oh-my-zsh/custom/completions"
+}
+
+find_latest_backup() {
+    find "$BACKUP_ROOT" -maxdepth 1 -type d -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]' -print 2>/dev/null | sort | tail -n 1 || true
+}
+
+rollback_bootstrap() {
+    local backup=""
+    local rel=""
+    local src=""
+    local dest=""
+
+    backup="$(find_latest_backup)"
+    if [ -z "$backup" ]; then
+        log_error "No bootstrap backup found under ${BACKUP_ROOT}."
+        exit 1
+    fi
+    if [ ! -f "$backup/manifest.txt" ]; then
+        log_error "Backup ${backup} has no manifest.txt; refusing to roll back."
+        exit 1
+    fi
+
+    log_step "Rolling back bootstrap changes from ${backup}"
+
+    while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        case "$rel" in
+            \#* | manifest.txt) continue ;;
+        esac
+        src="$backup/$rel"
+        dest="${TARGET_HOME}/$rel"
+
+        if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+            log_warn "Backup entry missing on disk: ${src}"
+            continue
+        fi
+
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log_info "[DRY-RUN] Restore ${rel} from ${backup}"
+            continue
+        fi
+
+        rm -rf "$dest"
+        mkdir -p "$(dirname "$dest")"
+        cp -a "$src" "$dest"
+        chown -R "${TARGET_USER}" "$dest" 2>/dev/null || true
+        log_info "Restored ${rel}"
+    done <"$backup/manifest.txt"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log_info "Dry-run rollback completed. No files were modified."
+    else
+        log_success "Rollback complete. Files from ${backup} were restored."
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Version / update helpers.
+# ------------------------------------------------------------------------------
+fetch_remote_bootstrap_version() {
+    local version=""
+
+    if command -v curl >/dev/null 2>&1; then
+        version="$(curl -m 10 -fsSL "${RAW_REPO_BASE}/bootstrap.sh" 2>/dev/null | sed -n 's/^BOOTSTRAP_VERSION="\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    elif command -v wget >/dev/null 2>&1; then
+        version="$(wget -T 10 -qO- "${RAW_REPO_BASE}/bootstrap.sh" 2>/dev/null | sed -n 's/^BOOTSTRAP_VERSION="\([^"]*\)".*/\1/p' | head -n 1 || true)"
+    else
+        log_error "Neither curl nor wget is available to check for updates."
+        return 1
+    fi
+
+    printf '%s' "$version"
+}
+
+check_for_update() {
+    local local_v=""
+    local remote_v=""
+    local state_file="${STATE_DIR}/version"
+
+    if [ -f "$state_file" ]; then
+        # shellcheck disable=SC1090
+        . "$state_file"
+        local_v="${BOOTSTRAP_VERSION:-}"
+    fi
+
+    if [ -z "$local_v" ]; then
+        local_v="none"
+        log_info "No previous bootstrap version recorded at ${state_file}"
+    fi
+    log_info "Local bootstrap version: ${local_v}"
+
+    remote_v="$(fetch_remote_bootstrap_version || true)"
+    if [ -z "$remote_v" ]; then
+        log_error "Could not determine the remote bootstrap version."
+        exit 1
+    fi
+    log_info "Remote bootstrap version: ${remote_v}"
+
+    if [ "$remote_v" = "$local_v" ]; then
+        log_success "Bootstrap is up to date (${local_v})."
+    else
+        log_info "A new bootstrap version is available: ${local_v} -> ${remote_v}"
+        log_info "Re-run: curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh"
+    fi
+}
+
+write_version_state() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        return 0
+    fi
+    mkdir -p "$STATE_DIR"
+    cat >"${STATE_DIR}/version" <<EOF
+BOOTSTRAP_VERSION="$BOOTSTRAP_VERSION"
+EOF
+    chown "${TARGET_USER}" "${STATE_DIR}/version" 2>/dev/null || true
+    log_success "Bootstrap version ${BOOTSTRAP_VERSION} recorded in ${STATE_DIR}/version"
 }
 
 print_help() {
     cat <<EOF
-Gerzain's Linux & macOS System Bootstrap Script
+Gerzain's Linux & macOS System Bootstrap Script v${BOOTSTRAP_VERSION}
 
 Usage:
   ./bootstrap.sh [OPTIONS]
@@ -272,10 +489,28 @@ Options:
       --skip-dotfiles   Skip curated dotfiles, tmux, vim, and shell aliases
       --skip-keys       Skip ED25519 SSH and GPG key generation
       --dry-run         Print actions without executing commands
+      --rollback        Restore the newest bootstrap backup (user dotfiles)
+      --check-update    Compare local state against the remote bootstrap version
+      --locale-only     Run only the locale section
+      --timezone-only   Run only the timezone section
+      --system-only     Run only the package manager / system upgrade section
+      --core-only       Run only the core development packages section
+      --tools-only      Run only the modern CLI tools section
+      --embedded-only   Run only the embedded ARM/hardware section
+      --zsh-only        Run only the Zsh / Oh-My-Zsh section
+      --dotfiles-only   Run only the curated dotfiles and keys section
+      --rust-only       Run only the Rust toolchain section
+      --zed-only        Run only the Zed editor section
+  -v, --version         Print the bootstrap version and exit
   -h, --help            Show this help message and exit
 
 Environment Variables:
   TIMEZONE              Overrides auto-detected timezone if --timezone is omitted
+
+Notes:
+  Multiple --*-only flags may be combined to run a subset of sections.
+  The current run is logged to ~/.cache/leftger-bootstrap/ and user files are
+  backed up under ~/.local/state/leftger-bootstrap/backups/ before changes.
 EOF
 }
 
@@ -323,6 +558,68 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=1
             shift
             ;;
+        --rollback)
+            ROLLBACK=1
+            shift
+            ;;
+        --check-update)
+            CHECK_UPDATE=1
+            shift
+            ;;
+        --locale-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} locale "
+            shift
+            ;;
+        --timezone-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} timezone "
+            shift
+            ;;
+        --system-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} system "
+            shift
+            ;;
+        --core-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} core "
+            shift
+            ;;
+        --tools-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} tools "
+            shift
+            ;;
+        --embedded-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} embedded "
+            shift
+            ;;
+        --zsh-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} zsh "
+            shift
+            ;;
+        --dotfiles-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} dotfiles "
+            shift
+            ;;
+        --rust-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} rust "
+            shift
+            ;;
+        --zed-only)
+            ONLY_ACTIVE=1
+            ONLY_SECTIONS="${ONLY_SECTIONS} zed "
+            shift
+            ;;
+        -v | --version)
+            echo "leftger.github.io bootstrap v${BOOTSTRAP_VERSION}"
+            exit 0
+            ;;
         -h | --help)
             print_help
             exit 0
@@ -338,6 +635,28 @@ done
 # ------------------------------------------------------------------------------
 # Pre-flight Checks & Sudo Keepalive
 # ------------------------------------------------------------------------------
+if [ "$ROLLBACK" -eq 1 ] && [ "$CHECK_UPDATE" -eq 1 ]; then
+    log_error "--rollback and --check-update cannot be used together."
+    exit 1
+fi
+if [ "$ROLLBACK" -eq 1 ] && [ "$ONLY_ACTIVE" -eq 1 ]; then
+    log_error "--rollback cannot be combined with --*-only modes."
+    exit 1
+fi
+if [ "$CHECK_UPDATE" -eq 1 ] && [ "$ONLY_ACTIVE" -eq 1 ]; then
+    log_error "--check-update cannot be combined with --*-only modes."
+    exit 1
+fi
+
+# Positive --*-only modes should not prompt for sudo unless the selected
+# sections actually need root/administrator privileges.
+if [ "$ONLY_ACTIVE" -eq 1 ]; then
+    NEEDS_SUDO=0
+    case "$ONLY_SECTIONS" in
+        *" locale "* | *" timezone "* | *" system "* | *" core "* | *" tools "* | *" embedded "* | *" zsh "*) NEEDS_SUDO=1 ;;
+    esac
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
     log_info "Running in DRY RUN mode. No modifications will be made."
 fi
@@ -386,6 +705,34 @@ fi
 
 # Determine script location if running from a local checkout
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+
+# Runtime state/log locations under the target user's home.
+STATE_DIR="${TARGET_HOME}/.local/state/leftger-bootstrap"
+BACKUP_ROOT="${STATE_DIR}/backups"
+BACKUP_DIR=""
+
+# --check-update is a read-only shortcut that exits before any system changes.
+if [ "$CHECK_UPDATE" -eq 1 ]; then
+    check_for_update
+    exit 0
+fi
+
+LOG_FILE=""
+if [ "$DRY_RUN" -eq 0 ]; then
+    LOG_DIR="${TARGET_HOME}/.cache/leftger-bootstrap"
+    mkdir -p "$LOG_DIR" "$STATE_DIR" "$BACKUP_ROOT"
+    chown -R "${TARGET_USER}" "$LOG_DIR" "$STATE_DIR" 2>/dev/null || true
+    LOG_FILE="${LOG_DIR}/bootstrap-$(date +%Y%m%d_%H%M%S).log"
+    : >"$LOG_FILE"
+    chown "${TARGET_USER}" "$LOG_FILE" 2>/dev/null || true
+    log_info "Installation log: ${LOG_FILE}"
+fi
+
+# --rollback is also non-interactive and exits before package/system changes.
+if [ "$ROLLBACK" -eq 1 ]; then
+    rollback_bootstrap
+    exit 0
+fi
 
 run_cmd() {
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -440,7 +787,7 @@ cleanup() {
 }
 trap cleanup EXIT INT QUIT TERM
 
-if [ "$DRY_RUN" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
+if [ "$DRY_RUN" -eq 0 ] && [ "$NEEDS_SUDO" -eq 1 ] && [ "$(id -u)" -ne 0 ]; then
     if sudo -n true 2>/dev/null; then
         log_info "Sudo privileges active."
     else
@@ -471,6 +818,7 @@ APT_FLAGS=("-y" "-o" "Dpkg::Options::=--force-confdef" "-o" "Dpkg::Options::=--f
 # ------------------------------------------------------------------------------
 # Step 1: Locale Configuration (en_US.UTF-8)
 # ------------------------------------------------------------------------------
+if only_allows locale; then
 log_step "Configuring Locale to en_US.UTF-8"
 
 if [ "$OS_TYPE" = "Linux" ]; then
@@ -492,10 +840,12 @@ else
     log_info "macOS detected. Standard en_US.UTF-8 locale is enabled by default."
 fi
 log_success "Locale configured to en_US.UTF-8"
+fi
 
 # ------------------------------------------------------------------------------
 # Step 2: Timezone Configuration
 # ------------------------------------------------------------------------------
+if only_allows timezone; then
 if [ "$TIMEZONE_EXPLICIT" -eq 1 ]; then
     log_step "Configuring Timezone to ${TIMEZONE}"
 else
@@ -545,10 +895,12 @@ else
         fi
     fi
 fi
+fi
 
 # ------------------------------------------------------------------------------
 # Step 3: Package Manager & System Upgrades
 # ------------------------------------------------------------------------------
+if only_allows system; then
 if [ "$OS_TYPE" = "Darwin" ]; then
     log_step "Setting Up Homebrew on macOS"
 
@@ -628,10 +980,12 @@ else
         log_info "Skipping apt upgrades (--skip-upgrade specified)"
     fi
 fi
+fi
 
 # ------------------------------------------------------------------------------
 # Step 4: Core Development Tools & Dependencies
 # ------------------------------------------------------------------------------
+if only_allows core; then
 log_step "Installing Core Development Tools & Dependencies"
 
 if [ "$OS_TYPE" = "Darwin" ]; then
@@ -689,11 +1043,12 @@ else
     run_sudo apt-get install "${APT_FLAGS[@]}" "${CORE_PACKAGES[@]}"
     log_success "Core development packages installed via APT"
 fi
+fi
 
 # ------------------------------------------------------------------------------
 # Step 5: Modern CLI Productivity Utilities
 # ------------------------------------------------------------------------------
-if [ "$SKIP_TOOLS" -eq 0 ]; then
+if only_allows tools && [ "$SKIP_TOOLS" -eq 0 ]; then
     log_step "Installing Modern CLI Productivity Utilities"
 
     if [ "$OS_TYPE" = "Darwin" ]; then
@@ -740,7 +1095,7 @@ fi
 # ------------------------------------------------------------------------------
 # Step 6: Embedded ARM Toolchain & Hardware Tools
 # ------------------------------------------------------------------------------
-if [ "$SKIP_EMBEDDED" -eq 0 ]; then
+if only_allows embedded && [ "$SKIP_EMBEDDED" -eq 0 ]; then
     log_step "Installing Embedded ARM Cross-Compilation Toolchain & Hardware Tools"
 
     if [ "$OS_TYPE" = "Darwin" ]; then
@@ -800,14 +1155,24 @@ if [ "$SKIP_EMBEDDED" -eq 0 ]; then
 
     log_success "Embedded ARM toolchain and hardware access configured"
 else
-    log_info "Skipping embedded setup (--skip-embedded specified)"
+    if [ "$SKIP_EMBEDDED" -eq 1 ]; then
+        log_info "Skipping embedded setup (--skip-embedded specified)"
+    else
+        log_info "Skipping embedded section (not selected by --*-only)"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
 # Step 7: Zsh & Oh-My-Zsh Installation
 # ------------------------------------------------------------------------------
-if [ "$SKIP_ZSH" -eq 0 ]; then
+if only_allows zsh && [ "$SKIP_ZSH" -eq 0 ]; then
     log_step "Installing and Configuring Zsh + Oh-My-Zsh"
+
+    # Preserve the user's existing shell state before any file is modified.
+    backup_path "${TARGET_HOME}/.zshrc"
+    backup_path "${TARGET_HOME}/.bashrc"
+    backup_path "${TARGET_HOME}/.oh-my-zsh/custom/plugins"
+    backup_path "${TARGET_HOME}/.oh-my-zsh/custom/completions"
 
     if [ "$OS_TYPE" = "Linux" ]; then
         run_sudo apt-get install "${APT_FLAGS[@]}" zsh
@@ -921,14 +1286,21 @@ EOF
 
     log_success "Zsh & Oh-My-Zsh configured"
 else
-    log_info "Skipping Zsh setup (--skip-zsh specified)"
+    if [ "$SKIP_ZSH" -eq 1 ]; then
+        log_info "Skipping Zsh setup (--skip-zsh specified)"
+    else
+        log_info "Skipping Zsh section (not selected by --*-only)"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
 # Step 8: Curated Dotfiles (Vim, Tmux, Standards & Shell Productivity)
 # ------------------------------------------------------------------------------
-if [ "$SKIP_DOTFILES" -eq 0 ]; then
+if only_allows dotfiles && [ "$SKIP_DOTFILES" -eq 0 ]; then
     log_step "Configuring Curated Dotfiles & Shell Environment"
+
+    # Preserve every pre-existing dotfile / git config that is about to change.
+    backup_dotfiles
 
     # Setup directories
     mkdir -p "${TARGET_HOME}/.vim/colors"
@@ -1238,13 +1610,17 @@ EOF
 
     log_success "Dotfiles configured (.vimrc, themes, aliases, ~/.githooks dispatcher, and Git pa configured)"
 else
-    log_info "Skipping dotfiles setup (--skip-dotfiles specified)"
+    if [ "$SKIP_DOTFILES" -eq 1 ]; then
+        log_info "Skipping dotfiles setup (--skip-dotfiles specified)"
+    else
+        log_info "Skipping dotfiles section (not selected by --*-only)"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
 # Step 9: Rust Toolchain & Embedded Ecosystem
 # ------------------------------------------------------------------------------
-if [ "$SKIP_RUST" -eq 0 ]; then
+if only_allows rust && [ "$SKIP_RUST" -eq 0 ]; then
     log_step "Installing Rust Toolchain & Embedded Ecosystem"
 
     CARGO_HOME="${TARGET_HOME}/.cargo"
@@ -1299,13 +1675,17 @@ if [ "$SKIP_RUST" -eq 0 ]; then
 
     log_success "Rust toolchain and embedded tooling installed"
 else
-    log_info "Skipping Rust setup (--skip-rust specified)"
+    if [ "$SKIP_RUST" -eq 1 ]; then
+        log_info "Skipping Rust setup (--skip-rust specified)"
+    else
+        log_info "Skipping Rust section (not selected by --*-only)"
+    fi
 fi
 
 # ------------------------------------------------------------------------------
 # Step 10: Zed Editor
 # ------------------------------------------------------------------------------
-if [ "$SKIP_ZED" -eq 0 ]; then
+if only_allows zed && [ "$SKIP_ZED" -eq 0 ]; then
     log_step "Installing Zed Editor"
     if [ "$DRY_RUN" -eq 1 ]; then
         log_info "[DRY-RUN] Install Zed editor via curl -f https://zed.dev/install.sh | sh"
@@ -1319,18 +1699,29 @@ if [ "$SKIP_ZED" -eq 0 ]; then
         fi
     fi
 else
-    log_info "Skipping Zed setup (--skip-zed specified)"
+    if [ "$SKIP_ZED" -eq 1 ]; then
+        log_info "Skipping Zed setup (--skip-zed specified)"
+    else
+        log_info "Skipping Zed section (not selected by --*-only)"
+    fi
 fi
+
+# Record the successfully applied bootstrap version for future update checks.
+write_version_state
 
 # ------------------------------------------------------------------------------
 # Summary & Completion
 # ------------------------------------------------------------------------------
+SUMMARY_LOG="${LOG_FILE:-not created (dry-run)}"
+SUMMARY_BACKUP="${BACKUP_DIR:-none created (dry-run or no user files to protect)}"
+
 printf "\n${BOLD}${GREEN}================================================================${RESET}\n"
 printf "${BOLD}${GREEN}              Bootstrap Completed Successfully!                 ${RESET}\n"
 printf "${BOLD}${GREEN}================================================================${RESET}\n\n"
 
 cat <<EOF
 Summary of changes:
+  • Bootstrap Version: ${BOOTSTRAP_VERSION}
   • Operating System: ${OS_TYPE} (${ARCH_TYPE})
   • Package Manager: $([ "$OS_TYPE" = "Darwin" ] && echo "Homebrew" || echo "APT (Debian/Ubuntu)")
   • Timezone: ${TIMEZONE}
@@ -1345,9 +1736,14 @@ Summary of changes:
   • Security: ED25519 SSH & GPG signing keys verified / configured
   • Rust: stable toolchain, Cortex-M/RISC-V/Wasm targets, probe-rs, cargo-binstall, cargo-binutils, espflash
   • Editor: Zed editor installed to ~/.local/bin/zed
+  • Install log: ${SUMMARY_LOG}
+  • Backup: ${SUMMARY_BACKUP}
 
 Next steps:
   1. Start your new shell:
        $ exec zsh
   2. Happy hacking! 🦀⚡
+
+Rollback (restores the newest backup of user dotfiles/config):
+  curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh -s -- --rollback
 EOF

@@ -35,6 +35,24 @@ log_error() {
     printf "%b[ERROR]%b %s\n" "${RED}" "${RESET}" "$*" >&2
 }
 
+# 0. Check whether the installed leftger bootstrap is outdated.
+BOOTSTRAP_STATE="${HOME}/.local/state/leftger-bootstrap/version"
+LOCAL_BOOTSTRAP_VERSION="unknown"
+if [ -f "$BOOTSTRAP_STATE" ]; then
+    # shellcheck disable=SC1090
+    source "$BOOTSTRAP_STATE"
+    LOCAL_BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-unknown}"
+fi
+
+if command -v curl >/dev/null 2>&1; then
+    REMOTE_BOOTSTRAP_VERSION="$(curl -m 10 -fsSL https://raw.githubusercontent.com/leftger/leftger.github.io/main/bootstrap.sh 2>/dev/null | sed -n 's/^BOOTSTRAP_VERSION="\([^"]*\)".*/\1/p' | head -n1 || true)"
+    if [ -n "$REMOTE_BOOTSTRAP_VERSION" ] && [ "$REMOTE_BOOTSTRAP_VERSION" != "$LOCAL_BOOTSTRAP_VERSION" ]; then
+        log_section "Bootstrap update available"
+        log_info "leftger.github.io bootstrap ${LOCAL_BOOTSTRAP_VERSION} -> ${REMOTE_BOOTSTRAP_VERSION}"
+        log_info "Re-run: curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh"
+    fi
+fi
+
 # Request sudo credentials early if available
 if command -v sudo >/dev/null 2>&1; then
     sudo -v
