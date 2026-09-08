@@ -39,7 +39,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://leftger.github.io/bootstrap.sh | sh
    - `~/.editorconfig` standard cross-editor formatting rules.
    - `~/.hushlogin` to silence distracting login MOTD banners.
    - `~/.local/bin/full-upgrade` (alias: `up`): one-stop unattended updater for APT, Rust, Zed, Flatpak, Snap, pipx, npm, and WSL.
-   - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`, `up`), WSL interop (`cdw`, `exp`, `BROWSER="wslview"`, `usb-list`, `usb-attach`, `usb-detach`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gh`).
+   - `~/.bash_aliases` with directory navigation (`..`, `...`), quick helpers (`mcd <dir>`, `cdr <repo>`, `refreshenv`, `up`), WSL interop (`cdw`, `exp`, `BROWSER="wslview"`, `usb-list`, `usb-attach`, `usb-detach`), parallel compilation (`mk='make -j$(nproc)'`), and git web viewer (`gho`).
    - Global `~/.gitignore` (`core.excludesfile`) for OS, editor, and log artifacts.
    - Git defaults & productivity: `core.editor = vim`, `init.defaultBranch = main`, `push.autoSetupRemote = true`, `rebase.autoStash = true`, `merge.autoStash = true`, `git caane`, `git caa`, `git cob`, `git apply-gitignore`, and `git pa`.
 9. **Security & Cryptographic Keys**:

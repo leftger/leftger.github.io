@@ -88,7 +88,7 @@ alias mk='make -j$(nproc 2>/dev/null || echo 4)'
 alias py-env='python3 -m venv env && source env/bin/activate'
 
 # Git shortcuts & remote browser opener (macOS, Linux, WSL)
-gh() {
+gho() {
     local remote_url
     remote_url="$(git remote -v 2>/dev/null | grep fetch | head -1 | awk '{print $2}' | sed -e 's/:/\//' -e 's/git@/https:\/\//')"
     if [ -n "$remote_url" ]; then
